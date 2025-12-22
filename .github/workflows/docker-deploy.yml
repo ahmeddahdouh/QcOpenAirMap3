@@ -43,4 +43,4 @@ jobs:
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
             docker stop qcopenairmap3 || true
             docker rm qcopenairmap3 || true
-            docker run -d --name qcopenairmap3 -p 80:80 ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
+            docker run -d --name qcopenairmap3 -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
