@@ -34,7 +34,6 @@ __playwright__/
 playwright-report/
 tests/
 test-results/
-# .github/ supprimé pour permettre le push des workflows
 jest.config.js
 vitest.config.ts
 playwright.config.ts
