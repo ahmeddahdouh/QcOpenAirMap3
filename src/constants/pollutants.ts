@@ -60,6 +60,16 @@ export const seuilsBruit = {
   extrMauvais: { code: "extrMauvais", min: 95, max: 150 },
 };
 
+// Configuration des seuils pour le CO2 (valeurs en ppm)
+export const seuilsCo2 = {
+  bon: { code: "bon", min: 0, max: 600 },
+  moyen: { code: "moyen", min: 600, max: 1000 },
+  degrade: { code: "degrade", min: 1000, max: 1500 },
+  mauvais: { code: "mauvais", min: 1500, max: 2500 },
+  tresMauvais: { code: "tresMauvais", min: 2500, max: 5000 },
+  extrMauvais: { code: "extrMauvais", min: 5000, max: 10000 },
+};
+
 export const pollutants: Record<string, Pollutant> = {
   pm1: {
     name: "PM₁",
@@ -104,6 +114,12 @@ export const pollutants: Record<string, Pollutant> = {
     thresholds: seuilsBruit,
     supportedTimeSteps: ["instantane", "deuxMin"],
   },
+  co2: {
+    name: "CO₂",
+    code: "co2",
+    unit: "ppm",
+    thresholds: seuilsCo2,
+  },
 };
 
 // Configuration des polluants avec leur état d'activation
@@ -115,6 +131,7 @@ export const mesures = {
   so2: { name: "SO₂", code: "so2", activated: false }, // Dioxyde de soufre
   o3: { name: "O₃", code: "o3", activated: false }, // Ozone
   bruit: { name: "Bruit", code: "bruit", activated: false }, // Bruit environnemental
+  co2: { name: "CO₂", code: "co2", activated: true }, // Dioxyde de carbone
 };
 
 // Fonction pour obtenir le polluant par défaut
@@ -136,6 +153,7 @@ export const POLLUTANT_COLORS = {
   h2s: "#9B59B6",
   nh3: "#3498DB",
   bruit: "#FF8C42",
+  co2: "#FF5733",
 };
 
 export const isPollutantSupportedForTimeStep = (

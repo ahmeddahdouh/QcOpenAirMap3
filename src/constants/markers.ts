@@ -101,6 +101,20 @@ export const MARKER_CONFIGS: Record<string, MarkerConfig> = {
     ],
     defaultLevel: "default",
   },
+  moduleair: {
+    source: "moduleair",
+    basePath: "nebuleAirMarkers/nebuleAir",
+    levels: [
+      "bon",
+      "moyen",
+      "degrade",
+      "mauvais",
+      "tresMauvais",
+      "extrMauvais",
+      "default",
+    ],
+    defaultLevel: "default",
+  },
 };
 
 /**

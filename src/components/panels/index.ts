@@ -13,4 +13,5 @@ export { default as MobileAirDetailPanel } from "./MobileAirDetailPanel";
 export { default as MobileAirSelectionPanel } from "./MobileAirSelectionPanel";
 export { default as SignalAirDetailPanel } from "./SignalAirDetailPanel";
 export { default as SignalAirSelectionPanel } from "./SignalAirSelectionPanel";
+export { default as ModuleAirSidePanel } from "./ModuleAirSidePanel";
 

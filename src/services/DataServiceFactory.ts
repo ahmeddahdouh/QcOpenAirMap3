@@ -6,6 +6,7 @@ import { SignalAirService } from "./SignalAirService";
 import { MobileAirService } from "./MobileAirService";
 import { PurpleAirService } from "./PurpleAirService";
 import { SensorCommunityService } from "./SensorCommunityService";
+import { ModuleAirService } from "./ModuleAirService";
 
 export class DataServiceFactory {
   private static services: Map<string, DataService> = new Map();
@@ -35,6 +36,9 @@ export class DataServiceFactory {
           break;
         case "sensorCommunity":
           service = new SensorCommunityService();
+          break;
+        case "moduleair":
+          service = new ModuleAirService();
           break;
         default:
           throw new Error(`Service non supporté pour la source: ${sourceCode}`);
