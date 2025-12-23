@@ -1,5 +1,3 @@
-import { StadiaService } from './StadiaService';
-
 // Service pour récupérer les épisodes de pollution depuis l'API Atmosud
 
 export interface PollutionEpisode {
@@ -37,7 +35,6 @@ export class PollutionEpisodeService {
         method: "GET",
         headers: {
           Accept: "application/json",
-          ...StadiaService.getAuthHeader(),
         },
         mode: "cors",
       });
