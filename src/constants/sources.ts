@@ -62,6 +62,12 @@ export const sources: Sources = {
           "jour",
         ],
       },
+      moduleair: {
+        name: "Module Air",
+        code: "moduleair",
+        activated: true,
+        supportedTimeSteps: ["instantane", "deuxMin", "quartHeure", "heure", "jour"],
+      },
     },
   },
   signalair: {
@@ -81,7 +87,7 @@ export const sources: Sources = {
 // Fonction pour obtenir les sources activées par défaut
 export const getDefaultSources = (): string[] => {
   const defaultSources: string[] = [];
-  
+
   Object.entries(sources).forEach(([key, source]) => {
     if (source.activated && !source.isGroup) {
       // Source simple activée
@@ -95,6 +101,6 @@ export const getDefaultSources = (): string[] => {
       });
     }
   });
-  
+
   return defaultSources;
 };

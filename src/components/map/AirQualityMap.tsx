@@ -37,6 +37,7 @@ import MobileAirSelectionPanel from "../panels/MobileAirSelectionPanel";
 import MobileAirDetailPanel from "../panels/MobileAirDetailPanel";
 import SignalAirSelectionPanel from "../panels/SignalAirSelectionPanel";
 import SignalAirDetailPanel from "../panels/SignalAirDetailPanel";
+import ModuleAirSidePanel from "../panels/ModuleAirSidePanel";
 import MobileAirRoutes from "./MobileAirRoutes";
 import CustomSpiderfiedMarkers from "./CustomSpiderfiedMarkers";
 import CustomSpiderfiedSignalAirMarkers from "./CustomSpiderfiedSignalAirMarkers";
@@ -46,6 +47,7 @@ import DeviceStatistics from "./DeviceStatistics";
 import { AtmoRefService } from "../../services/AtmoRefService";
 import { AtmoMicroService } from "../../services/AtmoMicroService";
 import { NebuleAirService } from "../../services/NebuleAirService";
+import { ModuleAirService } from "../../services/ModuleAirService";
 import MarkerClusterGroup from "react-leaflet-cluster";
 
 // Hooks personnalisés
@@ -291,16 +293,16 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
     if (isHistoricalModeActive && !prevHistoricalModeRef.current) {
       // Fermer complètement tous les side panels (pas juste rabattus)
       sidePanels.handleCloseSidePanel();
-      
+
       // Fermer les panels SignalAir
       signalAir.handleCloseSignalAirPanel();
       signalAir.handleCloseSignalAirDetailPanel();
-      
+
       // Fermer les panels MobileAir
       mobileAir.handleCloseMobileAirSelectionPanel();
       mobileAir.handleCloseMobileAirDetailPanel();
     }
-    
+
     // Mettre à jour la référence
     prevHistoricalModeRef.current = isHistoricalModeActive;
   }, [isHistoricalModeActive]);
@@ -385,7 +387,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
     const isAlreadyAdded = sidePanels.comparisonState.comparedStations.some(
       (station) => station.id === device.id
     );
-    
+
     // Si la station est déjà ajoutée, la retirer (désélection)
     if (isAlreadyAdded) {
       handleRemoveStationFromComparison(device.id);
@@ -419,6 +421,11 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
       } else if (device.source === "nebuleair") {
         const nebuleAirService = new NebuleAirService();
         const siteInfo = await nebuleAirService.fetchSiteInfo(device.id);
+        variables = siteInfo.variables;
+        lastSeenSec = siteInfo.lastSeenSec;
+      } else if (device.source === "moduleair") {
+        const moduleAirService = new ModuleAirService();
+        const siteInfo = await moduleAirService.fetchSiteInfo(device.id);
         variables = siteInfo.variables;
         lastSeenSec = siteInfo.lastSeenSec;
       }
@@ -530,7 +537,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
       // Gérer PurpleAir avec side panel
       if (device.source === "purpleair") {
         const purpleAirDevice = device as any;
-        
+
         // Extraire les données PurpleAir
         const deviceData = {
           rssi: purpleAirDevice.rssi,
@@ -560,7 +567,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         sidePanels.setSelectedStation(stationInfo);
         sidePanels.setIsSidePanelOpen(true);
-        
+
         // Si le panneau est caché, le rouvrir automatiquement
         if (sidePanels.panelSize === "hidden") {
           sidePanels.setPanelSize("normal");
@@ -583,7 +590,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         sidePanels.setSelectedStation(stationInfo);
         sidePanels.setIsSidePanelOpen(true);
-        
+
         // Si le panneau est caché, le rouvrir automatiquement
         if (sidePanels.panelSize === "hidden") {
           sidePanels.setPanelSize("normal");
@@ -591,19 +598,25 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
         return;
       }
 
-      // En mode comparaison, gérer AtmoRef, AtmoMicro et NebuleAir
+      // En mode comparaison, gérer AtmoRef, AtmoMicro, NebuleAir et ModuleAir
       if (sidePanels.comparisonState.isComparisonMode) {
-        if (device.source === "atmoRef" || device.source === "atmoMicro" || device.source === "nebuleair") {
+        if (
+          device.source === "atmoRef" ||
+          device.source === "atmoMicro" ||
+          device.source === "nebuleair" ||
+          device.source === "moduleair"
+        ) {
           await handleAddStationToComparison(device);
         }
         return;
       }
 
-      // Supporter AtmoRef, AtmoMicro et NebuleAir en mode normal
+      // Supporter AtmoRef, AtmoMicro, NebuleAir et ModuleAir en mode normal
       if (
         device.source !== "atmoRef" &&
         device.source !== "atmoMicro" &&
-        device.source !== "nebuleair"
+        device.source !== "nebuleair" &&
+        device.source !== "moduleair"
       ) {
         return;
       }
@@ -631,6 +644,11 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
           const siteInfo = await nebuleAirService.fetchSiteInfo(device.id);
           variables = siteInfo.variables;
           lastSeenSec = siteInfo.lastSeenSec;
+        } else if (device.source === "moduleair") {
+          const moduleAirService = new ModuleAirService();
+          const siteInfo = await moduleAirService.fetchSiteInfo(device.id);
+          variables = siteInfo.variables;
+          lastSeenSec = siteInfo.lastSeenSec;
         }
       } catch (error) {
         console.error(
@@ -654,7 +672,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
       sidePanels.setSelectedStation(stationInfo);
       sidePanels.setIsSidePanelOpen(true);
-      
+
       // Si le panneau est caché, le rouvrir automatiquement
       if (sidePanels.panelSize === "hidden") {
         sidePanels.setPanelSize("normal");
@@ -670,6 +688,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
       }, 500); // Délai de 500ms pour éviter les clics multiples rapides
     }
   }, [isHistoricalModeActive, hideTooltip, sidePanels, handleAddStationToComparison]);
+
 
   // Callback pour la sélection d'un capteur depuis la recherche
   const handleSensorSelected = useCallback(
@@ -754,6 +773,20 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
             initialPollutant={selectedPollutant}
             onComparisonModeToggle={sidePanels.handleComparisonModeToggle}
             isComparisonMode={sidePanels.comparisonState.isComparisonMode}
+          />
+        )}
+
+      {/* Side Panel - ModuleAir */}
+      {!sidePanels.comparisonState.isComparisonMode &&
+        sidePanels.selectedStation?.source === "moduleair" && (
+          <ModuleAirSidePanel
+            isOpen={sidePanels.isSidePanelOpen}
+            selectedStation={sidePanels.selectedStation}
+            onClose={sidePanels.handleCloseSidePanel}
+            onHidden={() => sidePanels.handleSidePanelSizeChange("hidden")}
+            onSizeChange={sidePanels.handleSidePanelSizeChange}
+            panelSize={sidePanels.panelSize}
+            initialPollutant={selectedPollutant}
           />
         )}
 
@@ -929,50 +962,51 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
                 ))}
             </MarkerClusterGroup>
           ) : // Spiderfier automatique personnalisé - éclatement automatique des marqueurs qui se chevauchent
-          spiderfyConfig.enabled ? (
-            <CustomSpiderfiedMarkers
-              devices={devices.filter((device) => {
-                // Filtrer complètement les devices MobileAir (gérés par MobileAirRoutes)
-                if (device.source === "mobileair") {
-                  return false;
-                }
-                return true;
-              })}
-              createCustomIcon={createCustomIconWrapper}
-              handleMarkerClick={handleMarkerClick}
-              enabled={spiderfyConfig.enabled}
-              nearbyDistance={10} // Distance en pixels pour considérer les marqueurs comme se chevauchant
-              zoomThreshold={spiderfyConfig.autoSpiderfyZoomThreshold} // Seuil de zoom pour activer/désactiver le spiderfier
-              getMarkerKey={getMarkerKeyWrapper}
-              onMarkerHover={showTooltip}
-              onMarkerHoverOut={hideTooltip}
-              onMarkerClick={() => hideTooltip(true)}
-            />
-          ) : (
-            devices
-              .filter((device) => {
-                // Filtrer complètement les devices MobileAir (gérés par MobileAirRoutes)
-                if (device.source === "mobileair") {
-                  return false;
-                }
-                return true;
-              })
-              .map((device) => (
-                <Marker
-                  key={getMarkerKeyWrapper(device)}
-                  position={[device.latitude, device.longitude]}
-                  icon={createCustomIconWrapper(device)}
-                  eventHandlers={{
-                    click: () => {
-                      hideTooltip(true);
-                      handleMarkerClick(device);
-                    },
-                    mouseover: (e) => showTooltip(device, e),
-                    mouseout: () => hideTooltip(),
-                  }}
-                />
-              ))
-          )}
+            spiderfyConfig.enabled ? (
+              <CustomSpiderfiedMarkers
+                devices={devices.filter((device) => {
+                  // Filtrer complètement les devices MobileAir (gérés par MobileAirRoutes)
+                  if (device.source === "mobileair") {
+                    return false;
+                  }
+                  return true;
+                })}
+                createCustomIcon={createCustomIconWrapper}
+                handleMarkerClick={handleMarkerClick}
+                enabled={spiderfyConfig.enabled}
+                nearbyDistance={10} // Distance en pixels pour considérer les marqueurs comme se chevauchant
+                zoomThreshold={spiderfyConfig.autoSpiderfyZoomThreshold} // Seuil de zoom pour activer/désactiver le spiderfier
+                getMarkerKey={getMarkerKeyWrapper}
+                onMarkerHover={showTooltip}
+                onMarkerHoverOut={hideTooltip}
+                onMarkerClick={() => hideTooltip(true)}
+              />
+            ) : (
+              devices
+                .filter((device) => {
+                  // Filtrer complètement les devices MobileAir (gérés par MobileAirRoutes)
+                  if (device.source === "mobileair") {
+                    return false;
+                  }
+                  return true;
+                })
+                .map((device) => (
+                  <Marker
+                    key={getMarkerKeyWrapper(device)}
+                    position={[device.latitude, device.longitude]}
+                    icon={createCustomIconWrapper(device)}
+                    eventHandlers={{
+                      click: () => {
+                        hideTooltip(true);
+                        handleMarkerClick(device);
+                      },
+                      mouseover: (e) => showTooltip(device, e),
+                      mouseout: () => hideTooltip(),
+                    }}
+                  />
+                ))
+            )
+          }
 
           {/* Parcours MobileAir - Afficher seulement la route active */}
           <MobileAirRoutes
@@ -1101,11 +1135,10 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         {/* Contrôles de la carte */}
         <div
-          className={`absolute bottom-20 left-4 z-[1000] flex flex-col space-y-2 transition-all duration-300 ${
-            sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
-              ? "hidden md:flex"
-              : "flex"
-          }`}
+          className={`absolute bottom-20 left-4 z-[1000] flex flex-col space-y-2 transition-all duration-300 ${sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
+            ? "hidden md:flex"
+            : "flex"
+            }`}
         >
           {/* Contrôle du clustering */}
           <ClusterControl
@@ -1134,11 +1167,10 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         {mapLayers.currentModelingLegendUrl && (
           <div
-            className={`absolute hidden lg:block ${
-              sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
-                ? "bottom-28 right-4"
-                : "bottom-24 right-0"
-            } z-[1000] transition-all duration-300`}
+            className={`absolute hidden lg:block ${sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
+              ? "bottom-28 right-4"
+              : "bottom-24 right-0"
+              } z-[1000] transition-all duration-300`}
           >
             <div className="bg-white px-3 py-2 rounded-md shadow-lg border border-gray-200/70">
               <p className="text-xs text-gray-600 font-medium mb-1 whitespace-pre-line">
@@ -1156,9 +1188,9 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
         {wildfire.isWildfireLayerEnabled &&
           wildfire.wildfireLoading &&
           wildfire.wildfireReports.length === 0 && (
-          <div className="absolute top-24 right-4 z-[1000] max-w-xs bg-white border border-orange-200 text-orange-700 text-xs px-3 py-2 rounded-md shadow-lg">
-            Chargement des signalements d'incendies…
-          </div>
+            <div className="absolute top-24 right-4 z-[1000] max-w-xs bg-white border border-orange-200 text-orange-700 text-xs px-3 py-2 rounded-md shadow-lg">
+              Chargement des signalements d'incendies…
+            </div>
           )}
 
         {wildfire.isWildfireLayerEnabled && wildfire.wildfireError && (
@@ -1169,11 +1201,10 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         {/* Informations de la carte (nombre d'appareils et de signalements) */}
         <div
-          className={`absolute ${
-            sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
-              ? "bottom-8 right-4 hidden lg:block"
-              : "bottom-6 right-0 hidden lg:block"
-          } bg-white px-3 py-2 rounded-md shadow-lg z-[1000] transition-all duration-300`}
+          className={`absolute ${sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
+            ? "bottom-8 right-4 hidden lg:block"
+            : "bottom-6 right-0 hidden lg:block"
+            } bg-white px-3 py-2 rounded-md shadow-lg z-[1000] transition-all duration-300`}
         >
           <DeviceStatistics
             visibleDevices={visibleDevices}
@@ -1201,7 +1232,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
       {(() => {
         const getSignalAirIconPath = (signalType?: string | null): string => {
           if (!signalType) return "/markers/signalAirMarkers/odeur.png";
-          
+
           const typeMap: Record<string, string> = {
             odeur: "odeur",
             bruit: "bruits",
@@ -1209,18 +1240,18 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
             visuel: "visuel",
             pollen: "pollen",
           };
-          
+
           const mappedType = typeMap[signalType.toLowerCase()] || "odeur";
           return `/markers/signalAirMarkers/${mappedType}.png`;
         };
 
         // Calculer quels boutons doivent être affichés
-        const buttons: Array<{ key: string; element: JSX.Element }> = [];
+        const buttons: Array<{ key: string; element: React.ReactElement }> = [];
         const spacing = 60; // Espacement entre les boutons
 
         // Bouton pour rouvrir le panel de station masqué
-        if ((sidePanels.isSidePanelOpen || isComparisonPanelVisible) && 
-            sidePanels.panelSize === "hidden") {
+        if ((sidePanels.isSidePanelOpen || isComparisonPanelVisible) &&
+          sidePanels.panelSize === "hidden") {
           buttons.push({
             key: "station-panel",
             element: (
@@ -1259,8 +1290,8 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         // Bouton pour rouvrir le panel SignalAir masqué
         if (signalAir.isSignalAirDetailPanelOpen &&
-            signalAir.signalAirDetailPanelSize === "hidden" &&
-            signalAir.selectedSignalAirReport) {
+          signalAir.signalAirDetailPanelSize === "hidden" &&
+          signalAir.selectedSignalAirReport) {
           buttons.push({
             key: "signalair-panel",
             element: (
@@ -1287,7 +1318,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
         // Bouton pour rouvrir le panel MobileAir de détail masqué
         if (mobileAir.mobileAirRoutes.length > 0 &&
-            mobileAir.mobileAirDetailPanelSize === "hidden") {
+          mobileAir.mobileAirDetailPanelSize === "hidden") {
           buttons.push({
             key: "mobileair-detail-panel",
             element: (
@@ -1319,8 +1350,8 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
         // Bouton pour rouvrir le panel MobileAir Selection masqué
         // Afficher si la source est sélectionnée ET que le panel n'est pas visible
         if (selectedSources.includes("communautaire.mobileair") &&
-            (!mobileAir.isMobileAirSelectionPanelOpen || 
-             mobileAir.mobileAirSelectionPanelSize === "hidden")) {
+          (!mobileAir.isMobileAirSelectionPanelOpen ||
+            mobileAir.mobileAirSelectionPanelSize === "hidden")) {
           buttons.push({
             key: "mobileair-selection-panel",
             element: (
@@ -1373,8 +1404,8 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
         // Bouton pour rouvrir le panel SignalAir Selection masqué
         // Afficher si la source est sélectionnée ET que le panel n'est pas visible
         if (selectedSources.includes("signalair") &&
-            (!signalAir.isSignalAirPanelOpen || 
-             signalAir.signalAirPanelSize === "hidden")) {
+          (!signalAir.isSignalAirPanelOpen ||
+            signalAir.signalAirPanelSize === "hidden")) {
           buttons.push({
             key: "signalair-selection-panel",
             element: (
@@ -1437,7 +1468,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
               // Si 3 boutons: index 0 offset -spacing, index 1 offset 0, index 2 offset +spacing
               const centerIndex = (totalButtons - 1) / 2;
               const offset = (index - centerIndex) * spacing;
-              
+
               return (
                 <div
                   key={btn.key}

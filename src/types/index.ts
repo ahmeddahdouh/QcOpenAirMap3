@@ -471,6 +471,7 @@ export interface NebuleAirSensor {
   sensorId: string;
   time: string;
   timeUTC: string;
+  CO2: string;
   COV: string;
   NOISE?: string;
   PM1: string;
@@ -516,7 +517,8 @@ export const NEBULEAIR_POLLUTANT_MAPPING: Record<string, string> = {
   PM25: "pm25",
   PM10: "pm10",
   NOISE: "bruit",
-  // Note: NebuleAir fournit les particules fines (PM1, PM2.5, PM10) et le bruit (NOISE)
+  CO2: "co2",
+  // Note: NebuleAir fournit les particules fines (PM1, PM2.5, PM10), le bruit (NOISE) et le CO2
   // Les autres polluants (NO2, O3, SO2) ne sont pas disponibles
 };
 
@@ -644,11 +646,11 @@ export const SENSORCOMMUNITY_POLLUTANT_MAPPING: Record<string, string> = {
 
 // Mapping inverse pour construire les requêtes
 export const SENSORCOMMUNITY_POLLUTANT_REVERSE_MAPPING: Record<string, string> =
-  {
-    pm1: "P0",
-    pm10: "P1",
-    pm25: "P2",
-  };
+{
+  pm1: "P0",
+  pm10: "P1",
+  pm25: "P2",
+};
 
 // Mapping des pas de temps Sensor Community vers les paramètres d'API
 export const SENSORCOMMUNITY_TIMESTEP_MAPPING: Record<string, string> = {
