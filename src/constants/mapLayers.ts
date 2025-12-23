@@ -1,8 +1,16 @@
 import L from "leaflet";
 
+const STADIA_API_KEY = import.meta.env.VITE_STADIA_API_KEY;
+
+
+if (!STADIA_API_KEY) {
+  console.warn("⚠️ VITE_STADIA_API_KEY is missing");
+}
+
+
 export const baseLayers = {
   "Carte standard": L.tileLayer(
-    "https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png",
+    `https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key=${STADIA_API_KEY}`,
     {
       attribution:
         '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
