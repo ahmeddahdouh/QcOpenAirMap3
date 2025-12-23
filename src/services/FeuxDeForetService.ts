@@ -1,4 +1,5 @@
 import { WildfireReport } from "../types";
+import { StadiaService } from './StadiaService';
 
 interface RawWildfireSignalement {
   id: number;
@@ -33,7 +34,11 @@ export class FeuxDeForetService {
     const timestamp = Date.now();
     const url = `${FeuxDeForetService.BASE_URL}?context=web&limit=100&format=minimal&_t=${timestamp}`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      headers: {
+        ...StadiaService.getAuthHeader(),
+      },
+    });
 
     if (!response.ok) {
       throw new Error(

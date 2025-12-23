@@ -1,4 +1,5 @@
 import { DataService, MeasurementDevice, SignalAirReport } from "../types";
+import { StadiaService } from "./StadiaService";
 
 export abstract class BaseDataService implements DataService {
   protected sourceCode: string;
@@ -61,12 +62,11 @@ export abstract class BaseDataService implements DataService {
       };
 
       // Fusionner les en-têtes
-      if (options?.headers) {
-        defaultOptions.headers = {
-          ...defaultOptions.headers,
-          ...options.headers,
-        };
-      }
+      defaultOptions.headers = {
+        ...StadiaService.getAuthHeader(),
+        ...(defaultOptions.headers || {}),
+        ...(options?.headers || {}),
+      };
 
       const response = await fetch(url, defaultOptions);
 
