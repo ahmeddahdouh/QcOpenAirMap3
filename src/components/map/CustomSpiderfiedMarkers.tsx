@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { Marker, Polyline, CircleMarker } from "react-leaflet";
+import L from "leaflet";
 import { MeasurementDevice } from "../../types";
 import { useCustomSpiderfier } from "../../hooks/useCustomSpiderfier";
 
@@ -11,6 +12,9 @@ interface CustomSpiderfiedMarkersProps {
   nearbyDistance?: number;
   zoomThreshold?: number;
   getMarkerKey?: (device: MeasurementDevice) => string;
+  onMarkerHover?: (device: MeasurementDevice, event: L.LeafletMouseEvent) => void;
+  onMarkerHoverOut?: () => void;
+  onMarkerClick?: (device: MeasurementDevice) => void;
 }
 
 const CustomSpiderfiedMarkers: React.FC<CustomSpiderfiedMarkersProps> = ({
@@ -21,6 +25,9 @@ const CustomSpiderfiedMarkers: React.FC<CustomSpiderfiedMarkersProps> = ({
   nearbyDistance = 20,
   zoomThreshold = 12,
   getMarkerKey,
+  onMarkerHover,
+  onMarkerHoverOut,
+  onMarkerClick,
 }) => {
   const markerRefs = useRef<Map<string, any>>(new Map());
   const {
@@ -51,7 +58,19 @@ const CustomSpiderfiedMarkers: React.FC<CustomSpiderfiedMarkersProps> = ({
               position={position}
               icon={createCustomIcon(device)}
               eventHandlers={{
-                click: () => handleMarkerClick(device),
+                click: () => {
+                  // Masquer le tooltip lors du clic si la fonction est fournie
+                  if (onMarkerClick) {
+                    onMarkerClick(device);
+                  }
+                  handleMarkerClick(device);
+                },
+                ...(onMarkerHover && {
+                  mouseover: (e: L.LeafletMouseEvent) => onMarkerHover(device, e),
+                }),
+                ...(onMarkerHoverOut && {
+                  mouseout: () => onMarkerHoverOut(),
+                }),
               }}
               ref={(marker) => {
                 if (marker) {

@@ -34,8 +34,6 @@ const HistoricalChart: React.FC<HistoricalChartProps> = ({
   timeStep,
   sensorTimeStep,
 }) => {
-  console.log("data", data);
-  console.log("timeStep", timeStep);
 
   // État pour détecter le mode paysage sur mobile
   const [isLandscapeMobile, setIsLandscapeMobile] = useState(false);
@@ -110,6 +108,7 @@ const HistoricalChart: React.FC<HistoricalChartProps> = ({
     isMobile,
     showRawData,
     useSolidNebuleAirLines,
+    timeStep,
   });
 
   // Calculer les marges du graphique
@@ -131,6 +130,7 @@ const HistoricalChart: React.FC<HistoricalChartProps> = ({
     isMobile,
     isLandscapeMobile,
     stationInfo,
+    timeStep,
   });
 
   // Notifier le composant parent si des données corrigées sont disponibles

@@ -126,7 +126,6 @@ export const useAirQualityData = ({
           const mobileAirService = DataServiceFactory.getService("mobileair") as any;
           if (mobileAirService && typeof mobileAirService.clearRoutes === "function") {
             mobileAirService.clearRoutes();
-            console.log("🧹 [HOOK] Routes MobileAir nettoyées AVANT le rechargement");
           }
         } catch (error) {
           console.error("Erreur lors du nettoyage des routes MobileAir:", error);
@@ -140,17 +139,6 @@ export const useAirQualityData = ({
             const filteredDevices = prevDevices.filter((device) => {
               return device.source !== "mobileair";
             });
-            
-            console.log(
-              "🧹 [HOOK] Devices MobileAir nettoyés AVANT le rechargement:",
-              {
-                totalDevices: prevDevices.length,
-                filteredDevices: filteredDevices.length,
-                removedMobileAirDevices: prevDevices
-                  .filter((d) => d.source === "mobileair")
-                  .map((d) => ({ id: d.id, source: d.source })),
-              }
-            );
             
             return filteredDevices;
           }

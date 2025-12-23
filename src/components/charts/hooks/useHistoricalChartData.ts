@@ -16,6 +16,7 @@ interface UseHistoricalChartDataProps {
   isMobile: boolean;
   showRawData: boolean;
   useSolidNebuleAirLines: boolean;
+  timeStep?: string;
 }
 
 export const useHistoricalChartData = ({
@@ -26,26 +27,16 @@ export const useHistoricalChartData = ({
   isMobile,
   showRawData,
   useSolidNebuleAirLines,
+  timeStep,
 }: UseHistoricalChartDataProps) => {
   // Transformer les données pour amCharts
   const chartData = useMemo(() => {
-    const transformed = transformData(data, selectedPollutants, source, stations, isMobile);
-    console.log("[HistoricalChart] Données transformées:", {
-      source,
-      selectedPollutants,
-      dataKeys: Object.keys(data),
-      dataLengths: Object.keys(data).map(key => ({ key, length: data[key]?.length || 0 })),
-      transformedLength: transformed.length,
-      firstTransformedPoint: transformed[0],
-      samplePoint: transformed.length > 0 ? transformed[0] : null,
-    });
-    return transformed;
-  }, [data, selectedPollutants, source, stations, isMobile]);
+    return transformData(data, selectedPollutants, source, stations, isMobile, timeStep);
+  }, [data, selectedPollutants, source, stations, isMobile, timeStep]);
 
   // Grouper les polluants par unité
   const unitGroups = useMemo(() => {
     const groups = groupPollutantsByUnit(data, selectedPollutants, source, stations);
-    console.log("[HistoricalChart] Groupes d'unités:", groups);
     return groups;
   }, [selectedPollutants, data, source, stations]);
 
@@ -79,13 +70,6 @@ export const useHistoricalChartData = ({
 
   // Générer les configurations de séries
   const seriesConfigs = useMemo<SeriesConfig[]>(() => {
-    console.log("[HistoricalChart] Génération des séries:", {
-      source,
-      selectedPollutants,
-      unitKeys,
-      unitGroups,
-      pollutantDataFlags,
-    });
     
     const configs = generateSeriesConfigs(
       source,
@@ -96,29 +80,51 @@ export const useHistoricalChartData = ({
       pollutantDataFlags,
       showRawData,
       useSolidNebuleAirLines,
-      fallbackColors
+      fallbackColors,
+      timeStep,
+      chartData
     );
 
-    console.log("[HistoricalChart] Configurations de séries générées:", configs);
     return configs;
-  }, [source, stations, selectedPollutants, unitKeys, unitGroups, pollutantDataFlags, showRawData, useSolidNebuleAirLines]);
+  }, [source, stations, selectedPollutants, unitKeys, unitGroups, pollutantDataFlags, showRawData, useSolidNebuleAirLines, timeStep]);
 
-  // Détecter si des données corrigées sont disponibles (seulement pour AtmoMicro)
+  // Détecter si des données corrigées sont disponibles (pour AtmoMicro ou en mode comparaison avec stations atmoMicro)
   const hasCorrectedData = useMemo(() => {
-    return source === "atmoMicro" &&
-      selectedPollutants.some((pollutant) => {
+    // Mode normal AtmoMicro
+    if (source === "atmoMicro") {
+      return selectedPollutants.some((pollutant) => {
         return chartData.some(
           (point) => point[`${pollutant}_corrected`] !== undefined
         );
       });
-  }, [source, selectedPollutants, chartData]);
+    }
+    
+    // Mode comparaison : vérifier si au moins une station atmoMicro a des données corrigées
+    if (source === "comparison" && stations && stations.length > 0) {
+      return stations.some((station) => {
+        if (station.source === "atmoMicro") {
+          return chartData.some(
+            (point) => point[`${station.id}_corrected`] !== undefined
+          );
+        }
+        return false;
+      });
+    }
+    
+    return false;
+  }, [source, selectedPollutants, chartData, stations]);
 
   // Transformer les données pour amCharts (timestamp en nombre)
+  // IMPORTANT: Préserver les valeurs null pour les gaps
+  // Les points null insérés par fillGapsInData doivent être préservés
   const amChartsData = useMemo(() => {
-    return chartData.map((point: any) => {
+    const transformed = chartData.map((point: any) => {
       let timestamp: number;
       
-      if (point.timestampValue !== undefined) {
+      // Si le point a déjà un timestamp en nombre (depuis fillGapsInData), l'utiliser
+      if (point.timestamp !== undefined && typeof point.timestamp === 'number') {
+        timestamp = point.timestamp;
+      } else if (point.timestampValue !== undefined) {
         timestamp = point.timestampValue;
       } else if (typeof point.rawTimestamp === 'number') {
         timestamp = point.rawTimestamp;
@@ -137,11 +143,15 @@ export const useHistoricalChartData = ({
         }
       }
       
+      // Préserver toutes les propriétés du point, y compris les valeurs null
       return {
         ...point,
-        timestamp,
+        timestamp, // S'assurer que timestamp est toujours un nombre
       };
     });
+    
+    // Trier par timestamp pour que les gaps soient correctement positionnés
+    return transformed.sort((a, b) => a.timestamp - b.timestamp);
   }, [chartData]);
 
   return {

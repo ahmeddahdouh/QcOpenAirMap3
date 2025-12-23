@@ -10,6 +10,8 @@ import {
   getQualityLevel,
 } from "../../constants/qualityColors";
 import { AmChartsLineChart, AmChartsLineChartData, AmChartsLineSeries } from "../charts";
+import { getCommonThresholds } from "../charts/utils/historicalChartConfig";
+import { addThresholdZones } from "../charts/utils/amChartsHelpers";
 import * as am5 from "@amcharts/amcharts5";
 import * as am5xy from "@amcharts/amcharts5/xy";
 
@@ -103,22 +105,6 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
     return colors[index % colors.length];
   }, []);
 
-  // Fonction pour obtenir une couleur plus foncée
-  const getDarkerColor = useCallback((color: string): string => {
-    // Convertir hex en RGB
-    const hex = color.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16);
-    const g = parseInt(hex.substring(2, 4), 16);
-    const b = parseInt(hex.substring(4, 6), 16);
-    
-    // Assombrir en réduisant de 30%
-    const darkerR = Math.max(0, Math.floor(r * 0.7));
-    const darkerG = Math.max(0, Math.floor(g * 0.7));
-    const darkerB = Math.max(0, Math.floor(b * 0.7));
-    
-    // Convertir back en hex
-    return `#${darkerR.toString(16).padStart(2, '0')}${darkerG.toString(16).padStart(2, '0')}${darkerB.toString(16).padStart(2, '0')}`;
-  }, []);
 
   const handlePanelSizeChange = (newSize: PanelSize) => {
     if (onSizeChange) {
@@ -290,6 +276,20 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
       chartRef.current = chart;
       rootRef.current = root;
 
+      // Récupérer l'axe X et l'axe Y
+      const xAxis = chart.xAxes.getIndex(0) as am5xy.DateAxis<am5xy.AxisRendererX>;
+      const yAxis = chart.yAxes.getIndex(0) as am5xy.ValueAxis<am5xy.AxisRendererY>;
+
+      // Calculer les seuils communs pour les polluants sélectionnés
+      const commonThresholds = getCommonThresholds(localSelectedPollutants, "mobileair", []);
+      
+      // Ajouter les zones de seuils si disponibles
+      if (commonThresholds && yAxis) {
+        const yAxisMap = new Map<string, am5xy.ValueAxis<am5xy.AxisRendererY>>();
+        yAxisMap.set("left", yAxis);
+        addThresholdZones(yAxisMap, commonThresholds);
+      }
+
       // Récupérer toutes les séries et les stocker
       chart.series.each((seriesItem) => {
         const lineSeries = seriesItem as am5xy.LineSeries;
@@ -324,7 +324,7 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
               ) || localSelectedPollutants[0];
               const config = pollutants[pollutantForSeries];
               
-              return `${formatDate(data.point.time)}<br/>${seriesName}: ${value.toFixed(1)} ${config?.unit || "µg/m³"}`;
+              return `${formatDate(data.point.time)} - ${seriesName}: ${value.toFixed(1)} ${config?.unit || "µg/m³"}`;
             }
             if (typeof value === "number") {
               return `${value.toFixed(1)} µg/m³`;
@@ -334,89 +334,88 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
         });
         lineSeries.set("tooltip", tooltip);
       });
-    },
-    [localSelectedPollutants] // Ne pas inclure highlightedPoint pour éviter les recréations
-  );
 
-  // Créer les bullets et gérer les interactions dans un useEffect séparé
-  useEffect(() => {
-    if (seriesRefs.current.size === 0) return;
+      // Configurer le curseur vertical au lieu des points
+      const cursor = chart.set("cursor", am5xy.XYCursor.new(root, {
+        behavior: "zoomXY",
+        xAxis: xAxis,
+      }));
+      
+      if (chart.series.length > 0) {
+        cursor.set("snapToSeries", chart.series.values);
+      }
+      
+      // Afficher uniquement la ligne verticale (pas la ligne horizontale)
+      cursor.lineY.set("visible", false);
+      cursor.lineX.set("visible", true);
+      cursor.lineX.set("stroke", am5.color("#666666"));
+      cursor.lineX.set("strokeWidth", 2);
+      cursor.lineX.set("strokeDasharray", [5, 5]);
 
-    // Configurer les bullets pour chaque série
-    seriesRefs.current.forEach((series, pollutantCode) => {
+      // Fonction pour trouver et mettre en évidence le point le plus proche
+      const findAndHighlightPoint = (xValue: number) => {
+        let closestPoint: MobileAirDataPoint | null = null;
+        let minDistance = Infinity;
 
-      // Créer des bulles pour les points (visibles au hover) - UNE SEULE FOIS
-      if (series.bullets.length === 0) {
-        const pollutantColor = getPollutantColor(pollutantCode, localSelectedPollutants.indexOf(pollutantCode));
+        // Parcourir toutes les séries pour trouver le point le plus proche
+        chart.series.each((seriesItem) => {
+          const lineSeries = seriesItem as am5xy.LineSeries;
+          const dataItemsArray = Array.from(lineSeries.dataItems);
+          for (const dataItem of dataItemsArray) {
+            const itemX = (dataItem as any).get("valueX") as number;
+            if (itemX !== undefined) {
+              const distance = Math.abs(itemX - xValue);
+              if (distance < minDistance) {
+                minDistance = distance;
+                const data = dataItem.dataContext as { point: MobileAirDataPoint };
+                if (data && data.point) {
+                  closestPoint = data.point;
+                }
+              }
+            }
+          }
+        });
+
+        if (closestPoint) {
+          setHoveredPoint(closestPoint);
+          if (onPointHover) {
+            onPointHover(closestPoint);
+          }
+        }
+      };
+
+      // Gérer les événements du curseur pour mettre en évidence les points
+      // Ajouter des bullets interactifs sur chaque série
+      chart.series.each((seriesItem) => {
+        const lineSeries = seriesItem as am5xy.LineSeries;
         
-        series.bullets.push((root, series, dataItem) => {
+        // Créer des bullets interactifs avec une zone de détection plus large
+        lineSeries.bullets.push((root, series, dataItem) => {
           const circle = am5.Circle.new(root, {
-            radius: 3,
-            fill: am5.color(pollutantColor + "80"), // Opacité 80
-            stroke: am5.color("#00000000"), // Couleur transparente (noir avec opacité 0)
-            strokeWidth: 0,
-            tooltipText: "{valueY}",
+            radius: 10, // Zone de détection plus large
+            fill: am5.color("#00000000"), // Transparent
+            stroke: am5.color("#00000000"), // Transparent
+            fillOpacity: 0,
+            strokeOpacity: 0,
             cursorOverStyle: "pointer",
           });
 
-          // Gérer le hover sur les points
-          circle.events.on("pointerover", (ev) => {
+          // Gérer le survol sur les bullets
+          circle.events.on("pointerover", () => {
             const data = dataItem.dataContext as { point: MobileAirDataPoint };
             if (data && data.point) {
-              const point = data.point;
-              setHoveredPoint(point);
+              setHoveredPoint(data.point);
               if (onPointHover) {
-                onPointHover(point);
+                onPointHover(data.point);
               }
-              if (onPointHighlight) {
-                onPointHighlight(point);
-              }
-              // Agrandir le point au hover
-              circle.animate({
-                key: "radius",
-                to: 6,
-                duration: 200,
-              });
-              circle.set("fill", am5.color(pollutantColor));
-              // Obtenir une couleur plus foncée pour le stroke
-              const darkerColor = getDarkerColor(pollutantColor);
-              circle.set("stroke", am5.color(darkerColor));
-              circle.set("strokeWidth", 3);
             }
           });
 
           circle.events.on("pointerout", () => {
+            // Réinitialiser le point survolé quand on quitte
             setHoveredPoint(null);
             if (onPointHover) {
               onPointHover(null);
-            }
-            if (onPointHighlight) {
-              onPointHighlight(null);
-            }
-            // Réduire le point
-            const data = dataItem.dataContext as { point: MobileAirDataPoint };
-            const isHighlighted =
-              highlightedPoint && data.point && isSamePoint(highlightedPoint, data.point);
-            if (!isHighlighted) {
-              circle.animate({
-                key: "radius",
-                to: 3,
-                duration: 200,
-              });
-              circle.set("fill", am5.color(pollutantColor + "80")); // Opacité 80
-              circle.set("stroke", am5.color("#00000000")); // Couleur transparente
-              circle.set("strokeWidth", 0);
-            }
-          });
-
-          circle.events.on("click", () => {
-            const data = dataItem.dataContext as { point: MobileAirDataPoint };
-            if (data && data.point) {
-              const point = data.point;
-              console.log("🖱️ Click sur point du graphique:", getPointId(point));
-              if (onPointHighlight) {
-                onPointHighlight(point);
-              }
             }
           });
 
@@ -424,58 +423,95 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
             sprite: circle,
           });
         });
-      }
-    });
-    },
-    [localSelectedPollutants, getPollutantColor, getDarkerColor, highlightedPoint, onPointHover, onPointHighlight]
-  );
-
-  // Mettre à jour l'apparence des points selon le highlight externe
-  useEffect(() => {
-    if (seriesRefs.current.size === 0) return;
-
-    // Mettre à jour pour toutes les séries
-    seriesRefs.current.forEach((series, pollutantCode) => {
-      const pollutantColor = getPollutantColor(pollutantCode, localSelectedPollutants.indexOf(pollutantCode));
-      
-      const dataItems = series.dataItems;
-      const dataItemsArray = Array.from(dataItems);
-      for (let i = 0; i < dataItemsArray.length; i++) {
-        const dataItem = dataItemsArray[i];
-        if (!dataItem) continue;
         
-        const data = dataItem.dataContext as { point: MobileAirDataPoint };
-        if (!data || !data.point) continue;
+      });
 
-        const isHighlighted =
-          highlightedPoint && isSamePoint(highlightedPoint, data.point);
-        const isHovered =
-          hoveredPoint && isSamePoint(hoveredPoint, data.point);
+      // Utiliser un intervalle pour vérifier la position du curseur
+      // Cette approche fonctionne en vérifiant périodiquement la position du curseur
+      let lastHoveredPoint: MobileAirDataPoint | null = null;
+      let cursorCheckInterval: any = null;
+      
+      const checkCursorPosition = () => {
+        if (!cursor || !xAxis) return;
+        
+        try {
+          // Obtenir la position X du curseur
+          // Le curseur amCharts stocke sa position dans l'axe X via getPrivate
+          const cursorX = (cursor as any).getPrivate("xPosition") as number | undefined;
+          const isVisible = cursor.get("visible") !== false;
+          
+          if (isVisible && cursorX !== undefined && !isNaN(cursorX)) {
+            // Convertir la position en valeur de date
+            const xValue = xAxis.positionToValue(cursorX);
+            
+            if (xValue !== undefined && !isNaN(xValue)) {
+              // Trouver le point le plus proche
+              let closestPoint: MobileAirDataPoint | null = null;
+              let minDistance = Infinity;
 
-        const bullet = dataItem.bullets?.[0];
-        if (bullet) {
-          const sprite = bullet.get("sprite") as am5.Circle;
-          if (sprite) {
-            if (isHighlighted || isHovered) {
-              sprite.set("radius", 6);
-              sprite.set("fill", am5.color(pollutantColor));
-              // Obtenir une couleur plus foncée pour le stroke
-              const darkerColor = getDarkerColor(pollutantColor);
-              sprite.set("stroke", am5.color(darkerColor));
-              sprite.set("strokeWidth", 3);
-            } else {
-              sprite.set("radius", 3);
-              sprite.set("fill", am5.color(pollutantColor + "80")); // Opacité 80
-              sprite.set("stroke", am5.color("#00000000")); // Couleur transparente
-              sprite.set("strokeWidth", 0);
+              chart.series.each((seriesItem) => {
+                const lineSeries = seriesItem as am5xy.LineSeries;
+                const dataItemsArray = Array.from(lineSeries.dataItems);
+                
+                for (const dataItem of dataItemsArray) {
+                  const itemX = (dataItem as any).get("valueX") as number;
+                  if (itemX !== undefined) {
+                    const distance = Math.abs(itemX - xValue);
+                    if (distance < minDistance) {
+                      minDistance = distance;
+                      const data = dataItem.dataContext as { point: MobileAirDataPoint };
+                      if (data && data.point) {
+                        closestPoint = data.point;
+                      }
+                    }
+                  }
+                }
+              });
+
+              // Mettre à jour seulement si le point a changé
+              if (closestPoint && (!lastHoveredPoint || !isSamePoint(closestPoint, lastHoveredPoint))) {
+                lastHoveredPoint = closestPoint;
+                setHoveredPoint(closestPoint);
+                if (onPointHover) {
+                  onPointHover(closestPoint);
+                }
+              }
+            }
+          } else if (lastHoveredPoint !== null) {
+            // Si le curseur n'est plus visible, réinitialiser
+            lastHoveredPoint = null;
+            setHoveredPoint(null);
+            if (onPointHover) {
+              onPointHover(null);
             }
           }
+        } catch (error) {
+          // Ignorer les erreurs silencieusement
+        }
+      };
+
+      // Vérifier la position du curseur périodiquement (toutes les 100ms)
+      cursorCheckInterval = setInterval(checkCursorPosition, 100);
+      
+      // Stocker l'intervalle pour le nettoyage
+      (root as any).__cursorCheckInterval = cursorCheckInterval;
+    },
+    [localSelectedPollutants, onPointHover] // Ne pas inclure highlightedPoint pour éviter les recréations
+  );
+
+  // Nettoyer l'intervalle du curseur au démontage
+  useEffect(() => {
+    return () => {
+      if (rootRef.current) {
+        const interval = (rootRef.current as any).__cursorCheckInterval;
+        if (interval) {
+          clearInterval(interval);
         }
       }
-    });
-    },
-    [highlightedPoint, hoveredPoint, localSelectedPollutants, getPollutantColor, getDarkerColor]
-  );
+    };
+  }, []);
+
+  // Plus besoin de gérer highlightedPoint, on utilise uniquement hoveredPoint
 
   // Return conditionnel APRÈS tous les hooks
   if (!isOpen || !routeToUse) {
@@ -644,46 +680,67 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
             </div>
           </div>
 
-          {/* Autres sessions disponibles */}
-          {allRoutes.length > 1 && (
+          {/* Sessions disponibles */}
+          {allRoutes.length > 0 && (
             <div className="border border-gray-200 rounded-lg p-3 sm:p-4">
               <h3 className="text-sm font-medium text-gray-700 mb-3 text-center">
-                Autres sessions disponibles ({allRoutes.length - 1})
+                Sessions disponibles ({allRoutes.length})
               </h3>
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {allRoutes
-                  .filter((route) => route.sessionId !== routeToUse.sessionId)
                   .sort(
                     (a, b) =>
                       new Date(b.startTime).getTime() -
                       new Date(a.startTime).getTime()
                   )
-                  .map((route) => (
-                    <button
-                      key={route.sessionId}
-                      onClick={() => onRouteSelect && onRouteSelect(route)}
-                      className="w-full flex items-center justify-between p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
-                    >
-                      <div className="text-left">
-                        <div className="text-sm font-medium text-gray-900">
-                          Session {route.sessionId}
+                  .map((route) => {
+                    const isCurrentSession = route.sessionId === routeToUse.sessionId;
+                    return (
+                      <button
+                        key={route.sessionId}
+                        onClick={() => onRouteSelect && onRouteSelect(route)}
+                        className={`w-full flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                          isCurrentSession
+                            ? "border-blue-500 bg-blue-50 hover:bg-blue-100"
+                            : "border-gray-200 hover:bg-gray-50"
+                        }`}
+                      >
+                        <div className="text-left">
+                          <div className="flex items-center gap-2">
+                            <div className={`text-sm font-medium ${
+                              isCurrentSession ? "text-blue-900" : "text-gray-900"
+                            }`}>
+                              Session {route.sessionId}
+                            </div>
+                            {isCurrentSession && (
+                              <span className="px-2 py-0.5 text-xs font-medium bg-blue-500 text-white rounded-full">
+                                Actuelle
+                              </span>
+                            )}
+                          </div>
+                          <div className={`text-xs ${
+                            isCurrentSession ? "text-blue-700" : "text-gray-600"
+                          }`}>
+                            {formatDate(route.startTime)} •{" "}
+                            {formatDuration(route.duration)}
+                          </div>
                         </div>
-                        <div className="text-xs text-gray-600">
-                          {formatDate(route.startTime)} •{" "}
-                          {formatDuration(route.duration)}
+                        <div className="text-right">
+                          <div className={`text-sm font-medium ${
+                            isCurrentSession ? "text-blue-900" : "text-gray-900"
+                          }`}>
+                            {route.averageValue.toFixed(1)}{" "}
+                            {pollutants[localSelectedPollutants[0]]?.unit || "µg/m³"}
+                          </div>
+                          <div className={`text-xs ${
+                            isCurrentSession ? "text-blue-700" : "text-gray-600"
+                          }`}>
+                            {route.points.length} points
+                          </div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-medium text-gray-900">
-                          {route.averageValue.toFixed(1)}{" "}
-                          {pollutants[localSelectedPollutants[0]]?.unit || "µg/m³"}
-                        </div>
-                        <div className="text-xs text-gray-600">
-                          {route.points.length} points
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
               </div>
             </div>
           )}
@@ -750,7 +807,7 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
           </div>
 
           {/* Point mis en surbrillance */}
-          {(highlightedPoint || hoveredPoint) && (
+          {hoveredPoint && (
             <div className="border border-yellow-300 rounded-lg p-3 sm:p-4 bg-blue-50">
               <h3 className="text-sm font-medium text-yellow-800 mb-3 flex items-center">
                 <span className="w-2 h-2 bg-yellow-500 rounded-full mr-2"></span>
@@ -760,14 +817,14 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
                 <div>
                   <span className="text-gray-600">Heure:</span>
                   <p className="font-medium">
-                    {formatDate((highlightedPoint || hoveredPoint)!.time)}
+                    {formatDate(hoveredPoint.time)}
                   </p>
                 </div>
                 <div>
                   <span className="text-gray-600">Position:</span>
                   <p className="font-medium text-xs">
-                    {(highlightedPoint || hoveredPoint)!.lat.toFixed(6)},{" "}
-                    {(highlightedPoint || hoveredPoint)!.lon.toFixed(6)}
+                    {hoveredPoint.lat.toFixed(6)},{" "}
+                    {hoveredPoint.lon.toFixed(6)}
                   </p>
                 </div>
                 <div>
@@ -777,7 +834,7 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
                       {localSelectedPollutants.map((pollutantCode, index) => {
                         const config = pollutants[pollutantCode];
                         const pollutantKey = getPollutantKey(pollutantCode);
-                        const value = (highlightedPoint || hoveredPoint)![
+                        const value = hoveredPoint[
                           pollutantKey as keyof MobileAirDataPoint
                         ] as number;
                         
@@ -804,7 +861,7 @@ const MobileAirDetailPanel: React.FC<MobileAirDetailPanelProps> = ({
                     <div className="space-y-1 mt-1">
                       {localSelectedPollutants.map((pollutantCode, index) => {
                         const pollutantKey = getPollutantKey(pollutantCode);
-                        const value = (highlightedPoint || hoveredPoint)![
+                        const value = hoveredPoint[
                           pollutantKey as keyof MobileAirDataPoint
                         ] as number;
                         

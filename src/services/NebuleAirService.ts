@@ -255,17 +255,15 @@ export class NebuleAirService extends BaseDataService {
     try {
       console.log("🔍 [NebuleAir] fetchSiteVariables appelé pour:", sensorId);
 
-      // Pour NebuleAir, tous les capteurs supportent les mêmes polluants
-      // Pas besoin de faire un appel API pour récupérer les métadonnées
       const variables: Record<
         string,
         { label: string; code_iso: string; en_service: boolean }
       > = {};
 
-      // Polluants supportés par NebuleAir - tous actifs par défaut
-      const supportedPollutants = ["PM1", "PM25", "PM10", "NOISE", "CO2"];
+      // Polluants toujours supportés par NebuleAir
+      const alwaysSupportedPollutants = ["PM1", "PM25", "PM10", "CO2"];
 
-      supportedPollutants.forEach((nebuleAirPollutant) => {
+      alwaysSupportedPollutants.forEach((nebuleAirPollutant) => {
         // Convertir le code NebuleAir vers notre code interne
         const ourPollutantCode =
           NEBULEAIR_POLLUTANT_MAPPING[nebuleAirPollutant];
@@ -273,10 +271,44 @@ export class NebuleAirService extends BaseDataService {
           variables[ourPollutantCode] = {
             label: this.getPollutantLabel(nebuleAirPollutant),
             code_iso: this.getPollutantCodeISO(nebuleAirPollutant),
-            en_service: true, // Tous les polluants NebuleAir sont actifs
+            en_service: true,
           };
         }
       });
+
+      // Vérifier si le capteur mesure vraiment le bruit
+      // Récupérer les métadonnées du capteur pour vérifier la valeur NOISE
+      try {
+        const sensorsMetadata = await this.getCachedSensorsMetadata();
+        const sensor = sensorsMetadata.find((s) => s.sensorId === sensorId);
+
+        if (sensor) {
+          // Vérifier si NOISE a une valeur valide (pas null, pas "-1")
+          const noiseValue = sensor.NOISE;
+          const hasValidNoise =
+            noiseValue !== null &&
+            noiseValue !== undefined &&
+            noiseValue !== "-1" &&
+            noiseValue.trim() !== "";
+
+          if (hasValidNoise) {
+            const ourPollutantCode = NEBULEAIR_POLLUTANT_MAPPING["NOISE"];
+            if (ourPollutantCode) {
+              variables[ourPollutantCode] = {
+                label: this.getPollutantLabel("NOISE"),
+                code_iso: this.getPollutantCodeISO("NOISE"),
+                en_service: true,
+              };
+            }
+          }
+        }
+      } catch (metadataError) {
+        console.warn(
+          `⚠️ [NebuleAir] Impossible de vérifier les métadonnées NOISE pour ${sensorId}:`,
+          metadataError
+        );
+        // En cas d'erreur, ne pas inclure NOISE par défaut
+      }
 
       console.log("✅ [NebuleAir] Variables retournées:", variables);
       return variables;
@@ -389,38 +421,46 @@ export class NebuleAirService extends BaseDataService {
         now: now.toISOString(),
       });
 
-      // Calculer la période relative en heures
-      const timeDiffMs = now.getTime() - startDate.getTime();
-      const timeDiffHours = Math.ceil(timeDiffMs / (1000 * 60 * 60));
+      // CORRECTION : Utiliser des dates absolues (ISO) au lieu du format relatif
+      // Cela garantit que toutes les sources (AtmoRef, AtmoMicro, NebuleAir) utilisent exactement la même période
+      // même si l'utilisateur ajoute des sources à des moments différents
+      // L'API NebuleAir accepte les dates ISO en format absolu pour start et stop
+      // Format attendu : 2019-09-16T12:00:00Z (sans millisecondes)
 
-      console.log(`🔍 [NebuleAir] [${callId}] Calcul de la période:`, {
-        timeDiffMs,
-        timeDiffHours,
-        timeDiffDays: Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24)),
-      });
+      // Formater les dates au format ISO sans millisecondes (format attendu par l'API NebuleAir)
+      const start = this.formatDateForNebuleAirAPI(startDate);
 
-      // Formater les paramètres start et stop
-      let start: string;
+      // Utiliser "now" pour stop si endDate est très proche de maintenant (dans les 5 minutes)
+      // Sinon, utiliser la date absolue pour garantir la cohérence
+      const timeDiffFromNow = Math.abs(now.getTime() - endDate.getTime());
+      const fiveMinutes = 5 * 60 * 1000;
+
       let stop: string;
-
-      if (timeDiffHours <= 24) {
-        // Pour les périodes ≤ 24h, utiliser le format en heures
-        start = `-${timeDiffHours}h`;
+      if (timeDiffFromNow <= fiveMinutes) {
+        // endDate est très proche de maintenant, utiliser "now" pour avoir les données les plus récentes
+        stop = "now";
       } else {
-        // Pour les périodes > 24h, utiliser le format en jours
-        const timeDiffDays = Math.ceil(timeDiffMs / (1000 * 60 * 60 * 24));
-        start = `-${timeDiffDays}d`;
+        // endDate est différente de maintenant (date personnalisée), utiliser la date absolue
+        stop = this.formatDateForNebuleAirAPI(endDate);
       }
 
-      // Pour les boutons prédéfinis, toujours utiliser "now" pour stop
-      // (3h, 24h, 7d, 30d) car on veut toujours la période jusqu'au présent
-      stop = "now";
+      console.log(`🔍 [NebuleAir] [${callId}] Calcul de la période:`, {
+        startDate: params.startDate,
+        endDate: params.endDate,
+        startDateObj: startDate.toISOString(),
+        endDateObj: endDate.toISOString(),
+        start,
+        stop,
+        timeDiffFromNow,
+        note: "Utilisation de dates absolues (ISO) pour garantir la cohérence avec AtmoRef et AtmoMicro",
+      });
 
       // Convertir le pas de temps au format de l'API
       const freq = this.convertTimeStepToFreq(params.timeStep);
 
       // Construire l'URL pour les données historiques selon l'exemple fourni
-      const url = `${this.BASE_URL}/capteurs/dataNebuleAir?capteurID=${params.sensorId}&start=${start}&stop=${stop}&freq=${freq}`;
+      // Encoder les paramètres start et stop pour l'URL
+      const url = `${this.BASE_URL}/capteurs/dataNebuleAir?capteurID=${params.sensorId}&start=${encodeURIComponent(start)}&stop=${encodeURIComponent(stop)}&freq=${freq}`;
 
       console.log(`🌐 [NebuleAir] [${callId}] URL construite:`, url);
       console.log(`📊 [NebuleAir] [${callId}] Paramètres finaux:`, {
@@ -430,10 +470,11 @@ export class NebuleAirService extends BaseDataService {
         startDate: params.startDate,
         endDate: params.endDate,
         start,
-        stop: "now (toujours jusqu'au présent)",
+        stop,
         freq,
         nebuleAirPollutant,
-        timeDiffHours,
+        timeDiffFromNow: timeDiffFromNow,
+        note: stop === "now" ? "Utilisation de 'now' car endDate proche de maintenant" : "Utilisation de date absolue pour garantir la cohérence",
       });
 
       const response = await this.makeRequest(url);
@@ -529,17 +570,53 @@ export class NebuleAirService extends BaseDataService {
     dateString: string,
     isEndDate: boolean = false
   ): string {
-    const date = new Date(dateString);
+    // Vérifier si la chaîne contient une composante horaire
+    const hasTimeComponent = /T\d{2}:\d{2}/.test(dateString);
 
-    if (isEndDate) {
-      // Date de fin : toujours à 23:59:59 UTC
-      date.setUTCHours(23, 59, 59, 999);
-    } else {
-      // Date de début : toujours à 00:00:00 UTC
-      date.setUTCHours(0, 0, 0, 0);
+    if (!hasTimeComponent) {
+      // Si pas d'heure, traiter comme une date locale (YYYY-MM-DD)
+      // Parser la date locale
+      const [year, month, day] = dateString.split('-').map(Number);
+
+      if (isNaN(year) || isNaN(month) || isNaN(day)) {
+        throw new Error(`Format de date invalide: ${dateString}. Format attendu: YYYY-MM-DD`);
+      }
+
+      // CORRECTION : Créer une date locale d'abord, puis convertir en UTC
+      // Pour la date de début : minuit local = 23h UTC la veille (si UTC+1)
+      // Pour la date de fin : minuit local du jour suivant = 23h UTC du jour sélectionné (si UTC+1)
+      // Exemple : date de fin "02/12/2025" → minuit local du 3 = 23h UTC du 2 décembre
+      // Cela garantit que la date de fin est toujours après la date de début
+      if (isEndDate) {
+        // Date de fin : créer minuit local du jour suivant pour couvrir toute la journée
+        // La conversion en UTC donne 23h UTC du jour sélectionné
+        const localNextDay = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
+        return localNextDay.toISOString();
+      } else {
+        // Date de début : créer minuit local, la conversion en UTC donne automatiquement 23h UTC la veille
+        const localDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+        return localDate.toISOString();
+      }
     }
 
+    // Si la date contient déjà une heure, la préserver telle quelle
+    // C'est le cas pour les périodes prédéfinies (3h, 24h, 7d, 30d) qui arrivent avec l'heure exacte
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Date invalide: ${dateString}`);
+    }
+
+    // Préserver l'heure existante - ne pas forcer à 00:00:00 ou 23:59:59
+    // Cela permet de respecter exactement la période demandée (ex: 24h exactement)
     return date.toISOString();
+  }
+
+  // Fonction pour formater une date au format attendu par l'API NebuleAir
+  // Format attendu : 2019-09-16T12:00:00Z (sans millisecondes)
+  private formatDateForNebuleAirAPI(date: Date): string {
+    // toISOString() retourne 2019-09-16T12:00:00.000Z
+    // On doit enlever les millisecondes pour avoir 2019-09-16T12:00:00Z
+    return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
   }
 
   // Méthode pour convertir le pas de temps au format de l'API
@@ -563,10 +640,6 @@ export class NebuleAirService extends BaseDataService {
     // L'API retourne les valeurs directement par nom de polluant (PM1, PM25, PM10)
     const value = dataPoint[pollutant];
 
-    console.log(`🔍 [NebuleAir] Extraction valeur pour ${pollutant}:`, {
-      dataPoint,
-      value,
-    });
 
     if (value === null || value === undefined || value === "-1") {
       return null;
@@ -604,17 +677,23 @@ export class NebuleAirService extends BaseDataService {
       const freq = this.convertTimeStepToFreq(params.timeStep);
 
       // Formater les dates au format ISO pour l'API
-      const startDate = this.formatDateForHistoricalMode(
+      const startDateFormatted = this.formatDateForHistoricalMode(
         params.startDate,
         false
       );
-      const endDate = this.formatDateForHistoricalMode(params.endDate, true);
+      const endDateFormatted = this.formatDateForHistoricalMode(params.endDate, true);
+
+      // Convertir en Date puis formater au format attendu par l'API NebuleAir (sans millisecondes)
+      const startDate = new Date(startDateFormatted);
+      const endDate = new Date(endDateFormatted);
+      const start = this.formatDateForNebuleAirAPI(startDate);
+      const end = this.formatDateForNebuleAirAPI(endDate);
 
       // Construire l'URL pour récupérer toutes les données des capteurs
       const url = `${this.BASE_URL
         }/capteurs/dataNebuleAirAll?start=${encodeURIComponent(
-          startDate
-        )}&end=${encodeURIComponent(endDate)}&freq=${freq}&format=JSON`;
+          start
+        )}&end=${encodeURIComponent(end)}&freq=${freq}&format=JSON`;
 
       console.log(`🌐 [NebuleAir] URL construite:`, url);
 
@@ -686,7 +765,16 @@ export class NebuleAirService extends BaseDataService {
               dataPoint,
               nebuleAirPollutant
             );
-            if (value === null || value === -1) return;
+            // Ne créer le device que si la valeur est valide
+            if (
+              value === null ||
+              value === undefined ||
+              value === -1 ||
+              isNaN(value) ||
+              typeof value !== "number"
+            ) {
+              return;
+            }
 
             // Créer le device de mesure
             const device: MeasurementDevice = {

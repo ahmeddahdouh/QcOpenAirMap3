@@ -258,6 +258,15 @@ const StationSidePanel: React.FC<StationSidePanelProps> = ({
 
   const handlePollutantToggle = (pollutant: string) => {
     setState((prev) => {
+      // Empêcher la désélection du dernier polluant
+      if (
+        prev.chartControls.selectedPollutants.includes(pollutant) &&
+        prev.chartControls.selectedPollutants.length === 1
+      ) {
+        // Ne rien faire si c'est le dernier polluant sélectionné
+        return prev;
+      }
+
       const newSelectedPollutants =
         prev.chartControls.selectedPollutants.includes(pollutant)
           ? prev.chartControls.selectedPollutants.filter((p) => p !== pollutant)
@@ -731,6 +740,9 @@ const StationSidePanel: React.FC<StationSidePanelProps> = ({
                             state.chartControls.selectedPollutants.includes(
                               pollutantCode
                             );
+                          const isLastSelectedAndDisabled =
+                            isSelected &&
+                            state.chartControls.selectedPollutants.length === 1;
 
                           return (
                             <button
@@ -739,10 +751,19 @@ const StationSidePanel: React.FC<StationSidePanelProps> = ({
                                 isEnabled &&
                                 handlePollutantToggle(pollutantCode)
                               }
-                              disabled={!isEnabled}
+                              disabled={!isEnabled || isLastSelectedAndDisabled}
+                              title={
+                                isLastSelectedAndDisabled
+                                  ? "Au moins un polluant doit rester sélectionné"
+                                  : !isEnabled
+                                  ? "Ce polluant n'est pas disponible pour cette station"
+                                  : undefined
+                              }
                               className={`w-full flex items-center px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md text-sm transition-all duration-200 ${
                                 !isEnabled
                                   ? "text-gray-400 cursor-not-allowed"
+                                  : isLastSelectedAndDisabled
+                                  ? "text-[#1f3c6d] bg-[#e7eef8] border border-[#c1d3eb] opacity-70 cursor-not-allowed"
                                   : isSelected
                                   ? "text-[#1f3c6d] bg-[#e7eef8] border border-[#c1d3eb]"
                                   : "text-gray-700 hover:bg-gray-50"
@@ -752,14 +773,20 @@ const StationSidePanel: React.FC<StationSidePanelProps> = ({
                                 className={`w-3 h-3 rounded border mr-2 flex items-center justify-center transition-colors flex-shrink-0 ${
                                   !isEnabled
                                     ? "border-gray-300 bg-gray-100"
-                                : isSelected
-                                ? "bg-[#325a96] border-[#325a96]"
-                                : "border-gray-300"
+                                    : isLastSelectedAndDisabled
+                                    ? "bg-[#325a96] border-[#325a96] opacity-60"
+                                    : isSelected
+                                    ? "bg-[#325a96] border-[#325a96]"
+                                    : "border-gray-300"
                                 }`}
                               >
-                                {isSelected && isEnabled && (
+                                {isSelected && (
                                   <svg
-                                    className="w-2 h-2 text-white"
+                                    className={`w-2 h-2 ${
+                                      isLastSelectedAndDisabled
+                                        ? "text-white opacity-60"
+                                        : "text-white"
+                                    }`}
                                     fill="currentColor"
                                     viewBox="0 0 20 20"
                                   >

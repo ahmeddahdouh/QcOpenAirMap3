@@ -174,24 +174,89 @@ export const generateSeriesConfigs = (
   pollutantDataFlags: Record<string, { hasCorrected: boolean; hasRaw: boolean }>,
   showRawData: boolean,
   useSolidNebuleAirLines: boolean,
-  fallbackColors: string[]
+  fallbackColors: string[],
+  timeStep?: string,
+  chartData?: any[]
 ): SeriesConfig[] => {
+  // Pour les pas de temps agrégés, insérer des points null et utiliser connect: false
+  // pour créer des gaps visuels dans la ligne
+  // Les points null sont insérés par fillGapsInData
+  const isAggregatedTimeStep = timeStep && ["quartHeure", "heure", "jour"].includes(timeStep);
+  // Avec connect: false et des points null, amCharts devrait dessiner des segments séparés
+  const shouldConnectNulls = !isAggregatedTimeStep;
+
   if (source === "comparison" && stations.length > 0) {
-    return stations.map((station, index) => {
+    const configs: SeriesConfig[] = [];
+    stations.forEach((station, index) => {
       const pollutant = selectedPollutants[0];
       const stationColor = fallbackColors[index % fallbackColors.length];
       const pollutantName = pollutants[pollutant]?.name || pollutant;
-
-      return {
-        dataKey: station.id,
-        name: `${station.name} - ${pollutantName}`,
-        color: stationColor,
-        strokeWidth: 2,
-        strokeDasharray: "0",
-        yAxisId: "left" as const,
-        connectNulls: true,
-      };
+      
+      // Pour les stations atmoMicro, gérer les données corrigées et brutes
+      if (station.source === "atmoMicro" && chartData) {
+        // Vérifier si cette station a des données corrigées
+        const hasCorrected = chartData.some(
+          (point: any) => point[`${station.id}_corrected`] !== undefined
+        );
+        const hasRaw = chartData.some(
+          (point: any) => point[`${station.id}_raw`] !== undefined
+        );
+        
+        // Ajouter la série corrigée si disponible
+        if (hasCorrected) {
+          configs.push({
+            dataKey: `${station.id}_corrected`,
+            name: `${station.name} - ${pollutantName} (corrigé)`,
+            color: stationColor,
+            strokeWidth: 2,
+            strokeDasharray: "0",
+            yAxisId: "left" as const,
+            connectNulls: shouldConnectNulls,
+          });
+        }
+        
+        // Ajouter la série brute si disponible et si showRawData est activé ou s'il n'y a pas de données corrigées
+        if (hasRaw && (showRawData || !hasCorrected)) {
+          configs.push({
+            dataKey: `${station.id}_raw`,
+            name: `${station.name} - ${pollutantName} (brute)`,
+            color: stationColor,
+            strokeWidth: 2,
+            strokeDasharray: "3 3",
+            yAxisId: "left" as const,
+            connectNulls: shouldConnectNulls,
+          });
+        }
+        
+        // Si aucune donnée corrigée ni brute, utiliser la valeur principale
+        if (!hasCorrected && !hasRaw) {
+          configs.push({
+            dataKey: station.id,
+            name: `${station.name} - ${pollutantName}`,
+            color: stationColor,
+            strokeWidth: 2,
+            strokeDasharray: "0",
+            yAxisId: "left" as const,
+            connectNulls: shouldConnectNulls,
+          });
+        }
+      } else {
+        // Pour les autres sources, déterminer le style de ligne selon la source
+        // NebuleAir : trait discontinu pour mettre en valeur les valeurs corrigées d'AtmoMicro
+        // AtmoRef et autres : trait plein
+        const isNebuleAir = station.source === "nebuleair";
+        configs.push({
+          dataKey: station.id,
+          name: `${station.name} - ${pollutantName}`,
+          color: stationColor,
+          strokeWidth: 2,
+          strokeDasharray: isNebuleAir ? "3 3" : "0",
+          yAxisId: "left" as const,
+          connectNulls: shouldConnectNulls,
+        });
+      }
     });
+    return configs;
   }
 
   // Mode normal : séries par unité
@@ -219,7 +284,7 @@ export const generateSeriesConfigs = (
           strokeWidth: 2,
           strokeDasharray: "0",
           yAxisId,
-          connectNulls: false,
+          connectNulls: shouldConnectNulls,
         });
       } else if (isAtmoMicro) {
         // AtmoMicro : données corrigées (trait plein) et brutes (trait discontinu)
@@ -231,7 +296,7 @@ export const generateSeriesConfigs = (
             strokeWidth: 2,
             strokeDasharray: "0",
             yAxisId,
-            connectNulls: false,
+            connectNulls: shouldConnectNulls,
           });
         }
         if (hasRawData && (showRawData || !hasCorrectedData)) {
@@ -242,7 +307,7 @@ export const generateSeriesConfigs = (
             strokeWidth: 2,
             strokeDasharray: "3 3",
             yAxisId,
-            connectNulls: false,
+            connectNulls: shouldConnectNulls,
           });
         }
       } else if (useSolidNebuleAirLines) {
@@ -253,7 +318,7 @@ export const generateSeriesConfigs = (
           strokeWidth: 2,
           strokeDasharray: "0",
           yAxisId,
-          connectNulls: false,
+          connectNulls: shouldConnectNulls,
         });
       } else {
         // Autres sources : trait discontinu par défaut
@@ -264,7 +329,7 @@ export const generateSeriesConfigs = (
           strokeWidth: 2,
           strokeDasharray: "3 3",
           yAxisId,
-          connectNulls: false,
+          connectNulls: shouldConnectNulls,
         });
       }
     });

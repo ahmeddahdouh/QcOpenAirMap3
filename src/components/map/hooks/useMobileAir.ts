@@ -79,6 +79,8 @@ export const useMobileAir = ({
     setMobileAirRoutes(routes);
 
     // Définir automatiquement la route la plus récente comme active
+    // UNIQUEMENT lors du chargement initial ou si le capteur a changé
+    // Ne PAS écraser la sélection manuelle de l'utilisateur pour une autre session
     if (routes.length > 0) {
       const mostRecentRoute = routes.reduce((latest, current) => {
         return new Date(current.startTime) > new Date(latest.startTime)
@@ -86,13 +88,20 @@ export const useMobileAir = ({
           : latest;
       });
 
-      // Vérifier si la route active a changé (nouveau capteur ou nouvelles données)
-      const hasChanged =
+      // Vérifier si on doit définir automatiquement la route active :
+      // 1. Aucune route n'est active (chargement initial)
+      // 2. Le capteur a changé (la route active actuelle n'existe plus dans les routes ou a un sensorId différent)
+      // Mais PAS si l'utilisateur a sélectionné manuellement une autre session du même capteur
+      const shouldSetActive =
         !activeMobileAirRoute ||
         activeMobileAirRoute.sensorId !== mostRecentRoute.sensorId ||
-        activeMobileAirRoute.sessionId !== mostRecentRoute.sessionId;
+        !routes.some(
+          (r) =>
+            r.sensorId === activeMobileAirRoute.sensorId &&
+            r.sessionId === activeMobileAirRoute.sessionId
+        );
 
-      if (hasChanged) {
+      if (shouldSetActive) {
         setActiveMobileAirRoute(mostRecentRoute);
         // Réinitialiser aussi la route sélectionnée si elle était liée à l'ancienne route active
         if (
@@ -103,7 +112,7 @@ export const useMobileAir = ({
         }
       }
     }
-  }, [devices, selectedSources, forceNewChoice, activeMobileAirRoute, selectedMobileAirRoute]);
+  }, [devices, selectedSources, forceNewChoice]);
 
   // Effet pour ouvrir automatiquement le side panel de sélection MobileAir
   useEffect(() => {

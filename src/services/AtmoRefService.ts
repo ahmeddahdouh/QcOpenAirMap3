@@ -348,16 +348,21 @@ export class AtmoRefService extends BaseDataService {
       // Créer un map des stations par ID pour un accès rapide
       const stationsMap = new Map<string, AtmoRefStation>();
       filteredStations.forEach((station) => {
-        console.log(station);
         stationsMap.set(station.id_station, station);
       });
 
       // Diviser la période en chunks de 30 jours pour éviter les timeouts
       const chunkSize = 30; // 30 jours
-      const start = new Date(params.startDate);
-      start.setUTCHours(0, 0, 0, 0);
-      const end = new Date(params.endDate);
-      end.setUTCHours(23, 59, 59, 999);
+      
+      // CORRECTION : Convertir les dates locales en UTC correctement
+      // Les dates arrivent en format YYYY-MM-DD et doivent être interprétées comme locales
+      const startDateISO = this.formatDateForHistoricalMode(params.startDate, false);
+      const endDateISO = this.formatDateForHistoricalMode(params.endDate, true);
+      
+      // Parser les dates ISO pour calculer les chunks
+      const start = new Date(startDateISO);
+      const end = new Date(endDateISO);
+      
       const temporalData: TemporalDataPoint[] = [];
 
       // Calculer le nombre de chunks
@@ -368,11 +373,10 @@ export class AtmoRefService extends BaseDataService {
 
       // Traiter chaque chunk
       for (let i = 0; i < chunks; i++) {
-        const chunkStart = new Date(start);
-        chunkStart.setDate(chunkStart.getDate() + i * chunkSize);
-
-        const chunkEnd = new Date(chunkStart);
-        chunkEnd.setDate(chunkEnd.getDate() + chunkSize - 1);
+        // CORRECTION : Utiliser UTC pour éviter les décalages de fuseau horaire
+        const chunkStart = new Date(start.getTime() + i * chunkSize * 24 * 60 * 60 * 1000);
+        
+        const chunkEnd = new Date(chunkStart.getTime() + (chunkSize - 1) * 24 * 60 * 60 * 1000);
 
         // S'assurer qu'on ne dépasse pas la date de fin
         if (chunkEnd > end) {
@@ -380,11 +384,23 @@ export class AtmoRefService extends BaseDataService {
         }
 
         try {
+          // Utiliser les dates formatées pour le premier et dernier chunk
+          const isFirstChunk = i === 0;
+          const isLastChunk = i === chunks - 1;
+          
+          const chunkStartISO = isFirstChunk 
+            ? startDateISO // Utiliser la date de début formatée initialement
+            : chunkStart.toISOString();
+            
+          const chunkEndISO = isLastChunk
+            ? endDateISO // Utiliser la date de fin formatée initialement
+            : chunkEnd.toISOString();
+          
           const chunkData = await this.fetchTemporalDataChunk(
             atmoRefPollutantName,
             timeStepConfig.temporalite,
-            chunkStart.toISOString(),
-            chunkEnd.toISOString(),
+            chunkStartISO,
+            chunkEndISO,
             stationsMap,
             params.pollutant
           );
@@ -419,20 +435,44 @@ export class AtmoRefService extends BaseDataService {
     dateString: string,
     isEndDate: boolean = false
   ): string {
-    const date = new Date(dateString);
-
-    // Conserver l'heure lorsque la chaîne d'origine contient une composante horaire.
-    // Utiliser l'arrondi à la journée uniquement pour les dates sans heure (ex: "2025-11-12").
+    // Vérifier si la chaîne contient une composante horaire
     const hasTimeComponent = /T\d{2}:\d{2}/.test(dateString);
 
     if (!hasTimeComponent) {
+      // Si pas d'heure, traiter comme une date locale (YYYY-MM-DD)
+      // Parser la date locale
+      const [year, month, day] = dateString.split('-').map(Number);
+      
+      if (isNaN(year) || isNaN(month) || isNaN(day)) {
+        throw new Error(`Format de date invalide: ${dateString}. Format attendu: YYYY-MM-DD`);
+      }
+      
+      // CORRECTION : Créer une date locale d'abord, puis convertir en UTC
+      // Pour la date de début : minuit local = 23h UTC la veille (si UTC+1)
+      // Pour la date de fin : minuit local du jour suivant = 23h UTC du jour sélectionné (si UTC+1)
+      // Exemple : date de fin "02/12/2025" → minuit local du 3 = 23h UTC du 2 décembre
+      // Cela garantit que la date de fin est toujours après la date de début
       if (isEndDate) {
-        date.setUTCHours(23, 59, 59, 999);
+        // Date de fin : créer minuit local du jour suivant pour couvrir toute la journée
+        // La conversion en UTC donne 23h UTC du jour sélectionné
+        const localNextDay = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
+        return localNextDay.toISOString();
       } else {
-        date.setUTCHours(0, 0, 0, 0);
+        // Date de début : créer minuit local, la conversion en UTC donne automatiquement 23h UTC la veille
+        const localDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+        return localDate.toISOString();
       }
     }
 
+    // Si la date contient déjà une heure, la préserver telle quelle
+    // C'est le cas pour les périodes prédéfinies (3h, 24h, 7d, 30d) qui arrivent avec l'heure exacte
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Date invalide: ${dateString}`);
+    }
+    
+    // Préserver l'heure existante - ne pas forcer à 00:00:00 ou 23:59:59
+    // Cela permet de respecter exactement la période demandée (ex: 24h exactement)
     return date.toISOString();
   }
 
@@ -444,12 +484,10 @@ export class AtmoRefService extends BaseDataService {
     stationsMap: Map<string, AtmoRefStation>,
     pollutant: string
   ): Promise<TemporalDataPoint[]> {
-    // Formater les dates pour le mode historique
-    const formattedStartDate = this.formatDateForHistoricalMode(
-      startDate,
-      false
-    );
-    const formattedEndDate = this.formatDateForHistoricalMode(endDate, true);
+    // Les dates sont déjà formatées correctement par fetchTemporalData
+    // On les utilise directement pour éviter un double formatage qui annulerait la conversion locale
+    const formattedStartDate = startDate;
+    const formattedEndDate = endDate;
 
     const url = `${
       this.BASE_URL
@@ -498,7 +536,13 @@ export class AtmoRefService extends BaseDataService {
             return;
           }
 
-          if (measure.valeur !== null && measure.valeur !== undefined) {
+          // Ne créer le device que si la valeur est valide
+          if (
+            measure.valeur !== null &&
+            measure.valeur !== undefined &&
+            !isNaN(measure.valeur) &&
+            typeof measure.valeur === "number"
+          ) {
             const pollutantConfig = pollutants[pollutant];
             if (pollutantConfig) {
               const qualityLevel = getAirQualityLevel(
@@ -509,25 +553,23 @@ export class AtmoRefService extends BaseDataService {
                 (qualityLevels[qualityLevel] || 0) + 1;
               totalValue += measure.valeur;
               validMeasureCount++;
-            }
 
-            devices.push({
-              id: measure.id_station,
-              name: measure.nom_station || station.nom_station,
-              latitude: station.latitude,
-              longitude: station.longitude,
-              source: this.sourceCode,
-              pollutant: pollutant,
-              value: measure.valeur,
-              unit: measure.unite,
-              timestamp: measure.date_debut,
-              status: measure.validation === "validée" ? "active" : "inactive",
-              qualityLevel: pollutantConfig
-                ? getAirQualityLevel(measure.valeur, pollutantConfig.thresholds)
-                : "default",
-              address: station.adresse,
-              departmentId: station.departement_id,
-            } as MeasurementDevice & { qualityLevel: string; address: string; departmentId: string });
+              devices.push({
+                id: measure.id_station,
+                name: measure.nom_station || station.nom_station,
+                latitude: station.latitude,
+                longitude: station.longitude,
+                source: this.sourceCode,
+                pollutant: pollutant,
+                value: measure.valeur,
+                unit: measure.unite,
+                timestamp: measure.date_debut,
+                status: measure.validation === "validée" ? "active" : "inactive",
+                qualityLevel,
+                address: station.adresse,
+                departmentId: station.departement_id,
+              } as MeasurementDevice & { qualityLevel: string; address: string; departmentId: string });
+            }
           }
         });
 

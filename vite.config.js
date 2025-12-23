@@ -22,26 +22,6 @@ export default defineConfig({
       ".ngrok-free.dev",
     ],
     proxy: {
-      "/signalair": {
-        target: "https://www.signalair.eu",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/signalair/, ""),
-        configure: (proxy) => {
-          proxy.on("error", (err) => {
-            console.log("proxy error", err);
-          });
-          proxy.on("proxyReq", (proxyReq, req) => {
-            console.log("Sending Request to the Target:", req.method, req.url);
-          });
-          proxy.on("proxyRes", (proxyRes, req) => {
-            console.log(
-              "Received Response from the Target:",
-              proxyRes.statusCode,
-              req.url
-            );
-          });
-        },
-      },
       "/aircarto": {
         target: "https://api.aircarto.fr",
         changeOrigin: true,

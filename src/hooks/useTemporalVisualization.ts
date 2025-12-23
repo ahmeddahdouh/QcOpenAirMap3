@@ -146,12 +146,31 @@ export const useTemporalVisualization = ({
 
       const results = await Promise.all(promises);
 
+      // Fonction helper pour vérifier si un device a une valeur valide
+      const isValidDevice = (device: any): boolean => {
+        return (
+          device &&
+          device.value !== null &&
+          device.value !== undefined &&
+          !isNaN(device.value) &&
+          typeof device.value === "number"
+        );
+      };
+
       // Fusionner toutes les données temporelles en groupant par timestamp
       const temporalDataMap = new Map<string, TemporalDataPoint>();
       const TOLERANCE_MS = 5 * 60 * 1000; // 5 minutes
 
       results.forEach((temporalData) => {
         temporalData.forEach((point) => {
+          // Filtrer les devices invalides avant la fusion
+          const validDevices = point.devices.filter(isValidDevice);
+          
+          // Si aucun device valide, ignorer ce point
+          if (validDevices.length === 0) {
+            return;
+          }
+
           // Chercher un timestamp existant proche
           const targetTime = new Date(point.timestamp).getTime();
           let existingTimestamp: string | null = null;
@@ -169,35 +188,87 @@ export const useTemporalVisualization = ({
           if (existingTimestamp) {
             const existingPoint = temporalDataMap.get(existingTimestamp)!;
 
-            // Fusionner les devices et métadonnées
-            existingPoint.devices.push(...point.devices);
-            existingPoint.deviceCount += point.deviceCount;
+            // Fusionner uniquement les devices valides
+            existingPoint.devices.push(...validDevices);
+            existingPoint.deviceCount = existingPoint.devices.length;
 
-            // Fusionner les niveaux de qualité
-            Object.entries(point.qualityLevels).forEach(([level, count]) => {
-              existingPoint.qualityLevels[level] =
-                (existingPoint.qualityLevels[level] || 0) + count;
+            // Recalculer les niveaux de qualité basés sur les devices valides
+            const qualityLevels: Record<string, number> = {};
+            existingPoint.devices.forEach((device) => {
+              const level = (device as any).qualityLevel || "default";
+              qualityLevels[level] = (qualityLevels[level] || 0) + 1;
             });
+            existingPoint.qualityLevels = qualityLevels;
 
-            // Recalculer la valeur moyenne
-            const totalValue = existingPoint.devices.reduce(
-              (sum, device) => sum + (device.value || 0),
+            // Recalculer la valeur moyenne uniquement avec les devices valides
+            const validDevicesForAverage = existingPoint.devices.filter(isValidDevice);
+            const totalValue = validDevicesForAverage.reduce(
+              (sum, device) => sum + device.value,
               0
             );
             existingPoint.averageValue =
-              totalValue / existingPoint.devices.length;
+              validDevicesForAverage.length > 0
+                ? totalValue / validDevicesForAverage.length
+                : 0;
           } else {
-            // Créer un nouveau point temporel
-            temporalDataMap.set(point.timestamp, { ...point });
+            // Créer un nouveau point temporel avec seulement les devices valides
+            const qualityLevels: Record<string, number> = {};
+            validDevices.forEach((device) => {
+              const level = (device as any).qualityLevel || "default";
+              qualityLevels[level] = (qualityLevels[level] || 0) + 1;
+            });
+
+            const totalValue = validDevices.reduce(
+              (sum, device) => sum + device.value,
+              0
+            );
+            const averageValue =
+              validDevices.length > 0 ? totalValue / validDevices.length : 0;
+
+            temporalDataMap.set(point.timestamp, {
+              timestamp: point.timestamp,
+              devices: validDevices,
+              deviceCount: validDevices.length,
+              averageValue,
+              qualityLevels,
+            });
           }
         });
       });
 
-      // Convertir en tableau et trier par timestamp
-      const allTemporalData = Array.from(temporalDataMap.values()).sort(
-        (a, b) =>
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-      );
+      // Filtrer une dernière fois pour s'assurer qu'aucun device invalide ne passe
+      const allTemporalData = Array.from(temporalDataMap.values())
+        .map((point) => ({
+          ...point,
+          devices: point.devices.filter(isValidDevice),
+        }))
+        .filter((point) => point.devices.length > 0) // Retirer les points sans devices valides
+        .map((point) => {
+          // Recalculer les métadonnées après le filtrage final
+          const qualityLevels: Record<string, number> = {};
+          point.devices.forEach((device) => {
+            const level = (device as any).qualityLevel || "default";
+            qualityLevels[level] = (qualityLevels[level] || 0) + 1;
+          });
+
+          const totalValue = point.devices.reduce(
+            (sum, device) => sum + device.value,
+            0
+          );
+          const averageValue =
+            point.devices.length > 0 ? totalValue / point.devices.length : 0;
+
+          return {
+            ...point,
+            deviceCount: point.devices.length,
+            averageValue,
+            qualityLevels,
+          };
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
 
       setState((prev) => ({
         ...prev,

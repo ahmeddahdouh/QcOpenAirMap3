@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useMap } from "react-leaflet";
-import { MeasurementDevice } from "../types";
+import { SignalAirReport } from "../types";
 
-interface UseCustomSpiderfierProps {
-  devices: MeasurementDevice[];
+interface UseSignalAirSpiderfierProps {
+  reports: SignalAirReport[];
   enabled: boolean;
-  nearbyDistance?: number; // Non utilisé - la comparaison se fait maintenant par position géographique exacte
   zoomThreshold?: number;
 }
 
@@ -24,12 +23,11 @@ const getPositionKey = (lat: number, lng: number): string => {
   return `${normalizedLat},${normalizedLng}`;
 };
 
-export const useCustomSpiderfier = ({
-  devices,
+export const useSignalAirSpiderfier = ({
+  reports,
   enabled,
-  nearbyDistance = 20,
-  zoomThreshold = 6,
-}: UseCustomSpiderfierProps) => {
+  zoomThreshold = 12,
+}: UseSignalAirSpiderfierProps) => {
   const map = useMap();
   const [spiderfiedMarkers, setSpiderfiedMarkers] = useState<Map<string, any>>(
     new Map()
@@ -70,35 +68,35 @@ export const useCustomSpiderfier = ({
     };
   }, [map, zoomThreshold]);
 
-  // Grouper les devices par position exacte (lat, lng) avec comparaison numérique robuste
-  const devicesByPosition = useMemo(() => {
-    const groups = new Map<string, MeasurementDevice[]>();
-    devices.forEach((device) => {
+  // Grouper les signalements par position exacte (lat, lng) avec comparaison numérique robuste
+  const reportsByPosition = useMemo(() => {
+    const groups = new Map<string, SignalAirReport[]>();
+    reports.forEach((report) => {
       // Utiliser une clé normalisée pour éviter les problèmes de précision flottante
-      const key = getPositionKey(device.latitude, device.longitude);
+      const key = getPositionKey(report.latitude, report.longitude);
       if (!groups.has(key)) {
         groups.set(key, []);
       }
-      groups.get(key)!.push(device);
+      groups.get(key)!.push(report);
     });
     return groups;
-  }, [devices]);
+  }, [reports]);
 
-  // Déterminer quels devices doivent être spiderfiés (seulement ceux avec position exacte identique)
-  const devicesToSpiderfy = useMemo(() => {
-    const result: MeasurementDevice[][] = [];
-    devicesByPosition.forEach((group) => {
-      // Seulement spiderfier si plus d'un device à la même position exacte
+  // Déterminer quels signalements doivent être spiderfiés (seulement ceux avec position exacte identique)
+  const reportsToSpiderfy = useMemo(() => {
+    const result: SignalAirReport[][] = [];
+    reportsByPosition.forEach((group) => {
+      // Seulement spiderfier si plus d'un signalement à la même position exacte
       if (group.length > 1) {
         result.push(group);
       }
     });
     return result;
-  }, [devicesByPosition]);
+  }, [reportsByPosition]);
 
   useEffect(() => {
-    if (!enabled || !map || devices.length === 0 || devicesToSpiderfy.length === 0) {
-      // Désactiver le spiderfier si pas de devices ou pas de groupes à spiderfier
+    if (!enabled || !map || reports.length === 0 || reportsToSpiderfy.length === 0) {
+      // Désactiver le spiderfier si pas de signalements ou pas de groupes à spiderfier
       setSpiderfiedMarkers(new Map());
       setGroupCenters(new Map());
       return;
@@ -119,8 +117,8 @@ export const useCustomSpiderfier = ({
       centerLat: number,
       centerLng: number,
       count: number
-    ): [number, number][] => {
-      const positions: [number, number][] = [];
+    ) => {
+      const positions = [];
       const angleStep = (2 * Math.PI) / count;
       const radius = 0.001; // Rayon en degrés
 
@@ -135,11 +133,11 @@ export const useCustomSpiderfier = ({
 
     // Utiliser les groupes précalculés basés sur les positions géographiques exactes
     const analyzeOverlappingMarkers = () => {
-      return devicesToSpiderfy;
+      return reportsToSpiderfy;
     };
 
     // Traiter les groupes qui se chevauchent
-    const processOverlappingGroups = (groups: MeasurementDevice[][]) => {
+    const processOverlappingGroups = (groups: SignalAirReport[][]) => {
       const newSpiderfiedMarkers = new Map<string, any>();
       const newGroupCenters = new Map<number, [number, number]>();
 
@@ -148,10 +146,10 @@ export const useCustomSpiderfier = ({
 
         // Calculer le centre du groupe
         const centerLat =
-          group.reduce((sum, device) => sum + device.latitude, 0) /
+          group.reduce((sum, report) => sum + report.latitude, 0) /
           group.length;
         const centerLng =
-          group.reduce((sum, device) => sum + device.longitude, 0) /
+          group.reduce((sum, report) => sum + report.longitude, 0) /
           group.length;
 
         // Stocker le centre du groupe
@@ -164,12 +162,12 @@ export const useCustomSpiderfier = ({
           group.length
         );
 
-        group.forEach((device, deviceIndex) => {
-          const newPosition = spiralPositions[deviceIndex];
-          newSpiderfiedMarkers.set(device.id, {
-            originalPosition: [device.latitude, device.longitude],
+        group.forEach((report, reportIndex) => {
+          const newPosition = spiralPositions[reportIndex];
+          newSpiderfiedMarkers.set(report.id, {
+            originalPosition: [report.latitude, report.longitude],
             spiderfiedPosition: newPosition,
-            device: device,
+            report: report,
             groupIndex: groupIndex,
           });
         });
@@ -182,25 +180,25 @@ export const useCustomSpiderfier = ({
     // Analyser et traiter les marqueurs
     const groups = analyzeOverlappingMarkers();
     processOverlappingGroups(groups);
-  }, [enabled, map, devicesToSpiderfy, currentZoom, zoomThreshold]);
+  }, [enabled, map, reportsToSpiderfy, currentZoom, zoomThreshold]);
 
   // Fonction pour obtenir la position d'un marqueur (originale ou éclatée)
-  const getMarkerPosition = (device: MeasurementDevice) => {
-    const spiderfiedData = spiderfiedMarkers.get(device.id);
+  const getMarkerPosition = (report: SignalAirReport) => {
+    const spiderfiedData = spiderfiedMarkers.get(report.id);
     if (spiderfiedData) {
       return spiderfiedData.spiderfiedPosition;
     }
-    return [device.latitude, device.longitude];
+    return [report.latitude, report.longitude];
   };
 
   // Fonction pour vérifier si un marqueur est éclaté
-  const isMarkerSpiderfied = (device: MeasurementDevice) => {
-    return spiderfiedMarkers.has(device.id);
+  const isMarkerSpiderfied = (report: SignalAirReport) => {
+    return spiderfiedMarkers.has(report.id);
   };
 
   // Fonction pour obtenir les données d'éclatement d'un marqueur
-  const getSpiderfiedData = (device: MeasurementDevice) => {
-    return spiderfiedMarkers.get(device.id);
+  const getSpiderfiedData = (report: SignalAirReport) => {
+    return spiderfiedMarkers.get(report.id);
   };
 
   return {
@@ -211,3 +209,4 @@ export const useCustomSpiderfier = ({
     groupCenters: Array.from(groupCenters.entries()),
   };
 };
+

@@ -88,7 +88,8 @@ export const createLineSeries = (
   xAxis: am5xy.DateAxis<am5xy.AxisRendererX>,
   yAxis: am5xy.ValueAxis<am5xy.AxisRendererY>,
   seriesConfig: SeriesConfig,
-  amChartsData: any[]
+  amChartsData: any[],
+  timeStep?: string
 ): am5xy.LineSeries => {
   const lineSeries = chart.series.push(
     am5xy.LineSeries.new(root, {
@@ -101,6 +102,11 @@ export const createLineSeries = (
       visible: true,
     })
   );
+  
+  // S'assurer que la série est visible et que le stroke est bien configuré
+  lineSeries.set("visible", true);
+  lineSeries.strokes.template.set("stroke", am5.color(seriesConfig.color));
+  lineSeries.strokes.template.set("strokeOpacity", 1);
 
   // Configurer l'épaisseur et le style de ligne
   lineSeries.strokes.template.set("strokeWidth", seriesConfig.strokeWidth);
@@ -114,17 +120,34 @@ export const createLineSeries = (
     }
   }
 
-  // Configurer connectNulls
-  if (seriesConfig.connectNulls) {
-    lineSeries.set("connect", true);
-  }
+  // Configurer connectNulls pour gérer les gaps
+  // Selon la doc amCharts 5 officielle:
+  // - connect: false = ne pas connecter les points avec des valeurs null, dessine des segments séparés
+  // - connect: true = connecter même les points null, dessine une ligne continue
+  // 
+  // APPROCHE CORRECTE selon la doc:
+  // 1. Insérer des valeurs null dans les données pour les gaps (fait par fillGapsInData)
+  // 2. Utiliser connect: false pour ne pas connecter les points null
+  // 3. Les timestamps doivent être des nombres (millisecondes) - déjà fait
+  const isAggregatedTimeStep = timeStep && ["quartHeure", "heure", "jour"].includes(timeStep);
+  const shouldConnect = !isAggregatedTimeStep; // false pour les pas de temps agrégés (avec valeurs null)
+  lineSeries.set("connect", shouldConnect);
 
   // Configurer le tooltip
   const seriesTooltip = createSeriesTooltip(root, seriesConfig);
   lineSeries.set("tooltip", seriesTooltip);
 
   // Ajouter des bullets invisibles pour l'interaction
+  // Ne créer des bullets que pour les points valides (pas undefined/null)
   lineSeries.bullets.push((root, series, dataItem) => {
+    const data = dataItem.dataContext as any;
+    const value = data?.[seriesConfig.dataKey];
+    
+    // Ne pas créer de bullet pour les points undefined/null
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    
     const circle = am5.Circle.new(root, {
       radius: 3,
       fill: am5.color(seriesConfig.color),
@@ -139,6 +162,16 @@ export const createLineSeries = (
 
   // Ajouter les données
   lineSeries.data.setAll(amChartsData);
+  
+  // Vérifier que la série a bien des points valides
+  const validPoints = amChartsData.filter(p => {
+    const value = p[seriesConfig.dataKey];
+    return value !== null && value !== undefined && !isNaN(value);
+  }).length;
+  
+  if (validPoints === 0) {
+    console.warn(`[amCharts] ATTENTION: La série "${seriesConfig.name}" n'a aucun point valide !`);
+  }
 
   return lineSeries;
 };
@@ -256,7 +289,7 @@ export const setupLegend = (
   legend.data.setAll(chart.series.values);
 
   // Gérer le clic sur la légende pour masquer/afficher les séries
-  legend.itemContainers.template.events.on("click", (ev) => {
+  legend.itemContainers.template.events.on("pointertap", (ev) => {
     const dataItem = ev.target.dataItem;
     if (dataItem) {
       const series = dataItem.dataContext as am5xy.LineSeries;

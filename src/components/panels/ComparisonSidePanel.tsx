@@ -47,6 +47,8 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
   const [internalPanelSize, setInternalPanelSize] =
     useState<PanelSize>("normal");
   const [showPollutantsList, setShowPollutantsList] = useState(false);
+  const [hasCorrectedData, setHasCorrectedData] = useState(false);
+  const [showRawData, setShowRawData] = useState(false);
 
   // Utiliser la taille externe si fournie, sinon la taille interne
   const currentPanelSize = externalPanelSize || internalPanelSize;
@@ -92,6 +94,24 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
       .map(([pollutantCode]) => pollutantCode);
   };
 
+  // Vérifier si au moins une station est un microcapteur (atmoMicro)
+  const hasAtmoMicroStation = (): boolean => {
+    return comparisonState.comparedStations.some(
+      (station) => station.source === "atmoMicro"
+    );
+  };
+
+  // Vérifier si on peut afficher le bouton données brutes
+  // Seulement si : au moins une station atmoMicro ET pas de temps = "heure"
+  const canShowRawDataButton = (): boolean => {
+    return hasAtmoMicroStation() && comparisonState.timeStep === "heure";
+  };
+
+  // Handler pour mettre à jour l'état des données corrigées
+  const handleHasCorrectedDataChange = (hasCorrected: boolean) => {
+    setHasCorrectedData(hasCorrected);
+  };
+
   // Mettre à jour l'état quand les props changent
   useEffect(() => {
     if (isOpen && comparisonState.comparedStations.length > 0) {
@@ -119,6 +139,9 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
 
       // Réinitialiser la taille du panel
       setInternalPanelSize("normal");
+      // Réinitialiser l'état des données brutes
+      setHasCorrectedData(false);
+      setShowRawData(false);
     } else {
       setInternalPanelSize("hidden");
     }
@@ -246,6 +269,12 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
       comparisonState.timeRange,
       timeStep
     );
+
+    // Réinitialiser l'affichage des données brutes si on change de pas de temps
+    // (les données corrigées ne sont disponibles qu'au pas de temps horaire)
+    if (timeStep !== "heure") {
+      setShowRawData(false);
+    }
 
     // Charger les données avec la période ajustée
     onLoadComparisonData(
@@ -412,7 +441,11 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
                     <p className="text-xs text-gray-500 truncate">
                       {station.source === "atmoRef"
                         ? "Station de référence"
-                        : "Microcapteur"}{" "}
+                        : station.source === "atmoMicro"
+                        ? "Microcapteur"
+                        : station.source === "nebuleair"
+                        ? "NebuleAir"
+                        : "Autre source"}{" "}
                       - {station.address}
                     </p>
                   </div>
@@ -479,15 +512,40 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
               </div>
             ) : (
               <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-                {/* Sélection du polluant */}
-                <div className="border border-gray-200 rounded-lg mb-3 sm:mb-4">
-                  <button
-                    onClick={() => setShowPollutantsList(!showPollutantsList)}
-                    className="w-full flex items-center justify-between p-2.5 sm:p-3 text-left hover:bg-gray-50 transition-colors rounded-lg"
-                  >
-                    <div className="flex items-center space-x-2 min-w-0 flex-1">
+                {/* Sélection du polluant et contrôle d'affichage des données brutes */}
+                <div className="flex flex-row items-start gap-2 sm:gap-4 mb-3 sm:mb-4">
+                  {/* Sélection du polluant */}
+                  <div className="flex-1 border border-gray-200 rounded-lg">
+                    <button
+                      onClick={() => setShowPollutantsList(!showPollutantsList)}
+                      className="w-full flex items-center justify-between p-2.5 sm:p-3 text-left hover:bg-gray-50 transition-colors rounded-lg"
+                    >
+                      <div className="flex items-center space-x-2 min-w-0 flex-1">
+                        <svg
+                          className="w-4 h-4 text-gray-600 flex-shrink-0"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                          />
+                        </svg>
+                        <span className="text-sm font-medium text-gray-700 truncate">
+                          Polluant comparé
+                        </span>
+                        <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex-shrink-0">
+                          {pollutants[comparisonState.selectedPollutant]?.name ||
+                            comparisonState.selectedPollutant}
+                        </span>
+                      </div>
                       <svg
-                        className="w-4 h-4 text-gray-600 flex-shrink-0"
+                        className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${
+                          showPollutantsList ? "rotate-180" : ""
+                        }`}
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -496,33 +554,10 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                          d="M19 9l-7 7-7-7"
                         />
                       </svg>
-                      <span className="text-sm font-medium text-gray-700 truncate">
-                        Polluant comparé
-                      </span>
-                      <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full flex-shrink-0">
-                        {pollutants[comparisonState.selectedPollutant]?.name ||
-                          comparisonState.selectedPollutant}
-                      </span>
-                    </div>
-                    <svg
-                      className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${
-                        showPollutantsList ? "rotate-180" : ""
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </button>
+                    </button>
 
                   {showPollutantsList && (
                     <div className="px-2.5 sm:px-3 pb-2.5 sm:pb-3 space-y-1">
@@ -570,6 +605,47 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
                       })}
                     </div>
                   )}
+                  </div>
+
+                  {/* Contrôle d'affichage des données brutes - seulement si conditions remplies */}
+                  {canShowRawDataButton() && hasCorrectedData && (
+                    <div className="flex-1 border border-gray-200 rounded-lg">
+                      <div className="p-2.5 sm:p-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2 min-w-0">
+                            <svg
+                              className="w-4 h-4 text-gray-600 flex-shrink-0"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                              />
+                            </svg>
+                            <span className="text-xs sm:text-sm font-medium text-gray-700 truncate">
+                              Données brutes
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setShowRawData(!showRawData)}
+                            className={`relative inline-flex h-4 w-8 sm:h-5 sm:w-9 items-center rounded-full transition-colors flex-shrink-0 ${
+                              showRawData ? "bg-blue-600" : "bg-gray-200"
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-2.5 w-2.5 sm:h-3 sm:w-3 transform rounded-full bg-white transition-transform ${
+                                showRawData ? "translate-x-4 sm:translate-x-5" : "translate-x-0.5 sm:translate-x-1"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Graphique */}
@@ -584,6 +660,8 @@ const ComparisonSidePanel: React.FC<ComparisonSidePanelProps> = ({
                     source="comparison"
                     stations={comparisonState.comparedStations}
                     timeStep={comparisonState.timeStep}
+                    onHasCorrectedDataChange={handleHasCorrectedDataChange}
+                    showRawData={showRawData}
                   />
                 </div>
 

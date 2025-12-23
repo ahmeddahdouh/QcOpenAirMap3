@@ -67,7 +67,7 @@ const DATA_SOURCES: DataSourceItem[] = [
         <span>
           Microcapteurs déployés par AtmoSud. Les données horaires sont consolidées
         </span>
-        <span className="inline-flex h-5 w-6 items-center justify-center rounded-full bg-[#0074d9] leading-none">
+        <span className="inline-flex h-5 w-6 items-center justify-center rounded-full bg-[#0074d9]/70 leading-none">
           <svg
             width="14"
             height="14"

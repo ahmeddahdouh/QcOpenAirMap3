@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "geoportal-extensions-leaflet";
@@ -40,6 +40,9 @@ import SignalAirDetailPanel from "../panels/SignalAirDetailPanel";
 import ModuleAirSidePanel from "../panels/ModuleAirSidePanel";
 import MobileAirRoutes from "./MobileAirRoutes";
 import CustomSpiderfiedMarkers from "./CustomSpiderfiedMarkers";
+import CustomSpiderfiedSignalAirMarkers from "./CustomSpiderfiedSignalAirMarkers";
+import MarkerTooltip from "./MarkerTooltip";
+import DeviceStatistics from "./DeviceStatistics";
 
 import { AtmoRefService } from "../../services/AtmoRefService";
 import { AtmoMicroService } from "../../services/AtmoMicroService";
@@ -55,6 +58,8 @@ import { useMapAttribution } from "./hooks/useMapAttribution";
 import { useSidePanels } from "./hooks/useSidePanels";
 import { useSignalAir } from "./hooks/useSignalAir";
 import { useMobileAir } from "./hooks/useMobileAir";
+import { useMarkerTooltip } from "./hooks/useMarkerTooltip";
+import { useVisibleDevices } from "./hooks/useVisibleDevices";
 
 // Utilitaires
 import {
@@ -122,7 +127,17 @@ const defaultClusterConfig = {
 const defaultSpiderfyConfig = {
   enabled: true, // active/desactive le spiderfier par defaut
   autoSpiderfy: true, // activation automatique du spiderfier au zoom
-  autoSpiderfyZoomThreshold: 10, // seuil de zoom plus bas pour activation plus précoce
+  autoSpiderfyZoomThreshold: 12, // seuil de zoom pour activer/désactiver le spiderfier
+};
+
+// Composant interne pour gérer les événements de la carte
+const MapClickHandler: React.FC<{ onMapClick: () => void }> = ({ onMapClick }) => {
+  useMapEvents({
+    click: () => {
+      onMapClick();
+    },
+  });
+  return null;
 };
 
 const AirQualityMap: React.FC<AirQualityMapProps> = ({
@@ -209,6 +224,47 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
     onMobileAirSensorSelected,
   });
 
+  // Hook pour gérer le tooltip au hover sur les marqueurs
+  const { tooltip, showTooltip, hideTooltip } = useMarkerTooltip({
+    minZoom: 11,
+    mapRef: mapView.mapRef,
+  });
+
+  // Hook pour filtrer les appareils visibles dans le viewport
+  // OPTIMISATION : Récupère aussi les statistiques pré-calculées
+  const { visibleDevices, visibleReports, statistics, sourceStatistics } = useVisibleDevices({
+    mapRef: mapView.mapRef,
+    devices,
+    reports,
+    debounceMs: 100,
+  });
+  const [tooltipMetadata, setTooltipMetadata] = useState<{
+    sensorModel?: string;
+    sensorBrand?: string;
+    measuredPollutants?: string[];
+  } | null>(null);
+
+  // Charger les métadonnées du capteur quand le tooltip est affiché
+  useEffect(() => {
+    if (tooltip.device) {
+      const loadMetadata = async () => {
+        try {
+          const { getSensorMetadata } = await import(
+            '../../utils/sensorMetadataUtils'
+          );
+          const metadata = await getSensorMetadata(tooltip.device!);
+          setTooltipMetadata(metadata);
+        } catch (error) {
+          console.error('Erreur lors du chargement des métadonnées:', error);
+          setTooltipMetadata(null);
+        }
+      };
+      loadMetadata();
+    } else {
+      setTooltipMetadata(null);
+    }
+  }, [tooltip.device]);
+
   const shouldShowStandardLegend =
     selectedSources.length > 0 || mapLayers.currentModelingWMTSLayer === null;
 
@@ -218,6 +274,10 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
 
   // Référence pour suivre l'état précédent du mode historique
   const prevHistoricalModeRef = useRef(isHistoricalModeActive);
+
+  // Refs pour empêcher les clics multiples rapides
+  const isProcessingClickRef = useRef(false);
+  const lastClickedDeviceIdRef = useRef<string | null>(null);
 
   // Effet pour fermer tous les side panels quand le mode historique est activé
   useEffect(() => {
@@ -313,6 +373,78 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
     sidePanels.setSelectedStation
   );
 
+  // Handler pour ajouter une station à la comparaison
+  const handleAddStationToComparison = async (device: MeasurementDevice) => {
+    // Vérifier que la station n'est pas déjà dans la liste
+    const isAlreadyAdded = sidePanels.comparisonState.comparedStations.some(
+      (station) => station.id === device.id
+    );
+
+    // Si la station est déjà ajoutée, la retirer (désélection)
+    if (isAlreadyAdded) {
+      handleRemoveStationFromComparison(device.id);
+      return;
+    }
+
+    // Vérifier les limites (max 5 stations) seulement si on ajoute une nouvelle station
+    if (sidePanels.comparisonState.comparedStations.length >= 5) {
+      console.warn("Maximum 5 stations autorisées en comparaison");
+      return;
+    }
+
+    try {
+      let variables: Record<
+        string,
+        { label: string; code_iso: string; en_service: boolean }
+      > = {};
+
+      // Récupérer les informations détaillées selon la source
+      let sensorModel: string | undefined;
+      let lastSeenSec: number | undefined;
+
+      if (device.source === "atmoRef") {
+        const atmoRefService = new AtmoRefService();
+        variables = await atmoRefService.fetchStationVariables(device.id);
+      } else if (device.source === "atmoMicro") {
+        const atmoMicroService = new AtmoMicroService();
+        const siteInfo = await atmoMicroService.fetchSiteVariables(device.id);
+        variables = siteInfo.variables;
+        sensorModel = siteInfo.sensorModel;
+      } else if (device.source === "nebuleair") {
+        const nebuleAirService = new NebuleAirService();
+        const siteInfo = await nebuleAirService.fetchSiteInfo(device.id);
+        variables = siteInfo.variables;
+        lastSeenSec = siteInfo.lastSeenSec;
+      } else if (device.source === "moduleair") {
+        const moduleAirService = new ModuleAirService();
+        const siteInfo = await moduleAirService.fetchSiteInfo(device.id);
+        variables = siteInfo.variables;
+        lastSeenSec = siteInfo.lastSeenSec;
+      }
+
+      const stationInfo: StationInfo = {
+        id: device.id,
+        name: device.name,
+        address: device.address || "",
+        departmentId: device.departmentId || "",
+        source: device.source,
+        variables,
+        sensorModel,
+        ...(lastSeenSec !== undefined && { lastSeenSec }),
+      };
+
+      sidePanels.setComparisonState((prev) => ({
+        ...prev,
+        comparedStations: [...prev.comparedStations, stationInfo],
+      }));
+    } catch (error) {
+      console.error(
+        "Erreur lors de l'ajout de la station à la comparaison:",
+        error
+      );
+    }
+  };
+
   // Wrapper pour createCustomIcon avec les états du composant
   // Wrappers pour les fonctions utilitaires avec les états du composant
   const createCustomIconWrapper = (device: MeasurementDevice) => {
@@ -369,7 +501,16 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
     mobileAir.handleMobileAirRouteClick(route);
   };
 
-  const handleMarkerClick = async (device: MeasurementDevice) => {
+  const handleMarkerClick = useCallback(async (device: MeasurementDevice) => {
+    // Empêcher les clics multiples rapides sur le même device
+    if (isProcessingClickRef.current && lastClickedDeviceIdRef.current === device.id) {
+      console.log('Clic ignoré : traitement en cours pour ce device');
+      return;
+    }
+
+    // Masquer le tooltip immédiatement lors d'un clic
+    hideTooltip(true);
+
     // Désactiver les clics sur les marqueurs en mode historique
     if (isHistoricalModeActive) {
       return;
@@ -380,118 +521,136 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
       return;
     }
 
-    // Gérer PurpleAir avec side panel
-    if (device.source === "purpleair") {
-      const purpleAirDevice = device as any;
-
-      // Extraire les données PurpleAir
-      const deviceData = {
-        rssi: purpleAirDevice.rssi,
-        uptime: purpleAirDevice.uptime,
-        confidence: purpleAirDevice.confidence,
-        temperature: purpleAirDevice.temperature,
-        humidity: purpleAirDevice.humidity,
-        pm1Value: purpleAirDevice.pm1Value,
-        pm25Value: purpleAirDevice.pm25Value,
-        pm10Value: purpleAirDevice.pm10Value,
-      };
-
-      // Stocker les données PurpleAir
-      setPurpleAirDeviceData((prev) => ({
-        ...prev,
-        [device.id]: deviceData,
-      }));
-
-      const stationInfo: StationInfo = {
-        id: device.id,
-        name: device.name,
-        address: device.address || "",
-        departmentId: device.departmentId || "",
-        source: device.source,
-        variables: {}, // PurpleAir ne fournit pas de variables contrôlables
-      };
-
-      sidePanels.setSelectedStation(stationInfo);
-      sidePanels.setIsSidePanelOpen(true);
-
-      // Si le panneau est caché, le rouvrir automatiquement
-      if (sidePanels.panelSize === "hidden") {
-        sidePanels.setPanelSize("normal");
-      }
-      return;
-    }
-
-    // Gérer Sensor Community avec side panel
-    if (device.source === "sensorCommunity") {
-      // Extraire l'ID du capteur depuis l'ID du device (format: sensorId_locationId)
-      // On stocke l'ID complet pour pouvoir l'afficher, mais le sensorId sera extrait dans le side panel
-      const stationInfo: StationInfo = {
-        id: device.id, // Format: sensorId_locationId ou sensorId directement
-        name: device.name,
-        address: device.address || "",
-        departmentId: device.departmentId || "",
-        source: device.source,
-        variables: {}, // SensorCommunity ne fournit pas de variables contrôlables
-      };
-
-      sidePanels.setSelectedStation(stationInfo);
-      sidePanels.setIsSidePanelOpen(true);
-
-      // Si le panneau est caché, le rouvrir automatiquement
-      if (sidePanels.panelSize === "hidden") {
-        sidePanels.setPanelSize("normal");
-      }
-      return;
-    }
-
-    // En mode comparaison, gérer AtmoRef et AtmoMicro uniquement
-    if (sidePanels.comparisonState.isComparisonMode) {
-      if (device.source === "atmoRef" || device.source === "atmoMicro") {
-        await handleAddStationToComparison(device);
-      }
-      return;
-    }
-
-    // Supporter AtmoRef, AtmoMicro, NebuleAir et ModuleAir en mode normal
-    if (
-      device.source !== "atmoRef" &&
-      device.source !== "atmoMicro" &&
-      device.source !== "nebuleair" &&
-      device.source !== "moduleair"
-    ) {
-      return;
-    }
+    // Marquer comme en cours de traitement
+    isProcessingClickRef.current = true;
+    lastClickedDeviceIdRef.current = device.id;
 
     try {
+      // Gérer PurpleAir avec side panel
+      if (device.source === "purpleair") {
+        const purpleAirDevice = device as any;
+
+        // Extraire les données PurpleAir
+        const deviceData = {
+          rssi: purpleAirDevice.rssi,
+          uptime: purpleAirDevice.uptime,
+          confidence: purpleAirDevice.confidence,
+          temperature: purpleAirDevice.temperature,
+          humidity: purpleAirDevice.humidity,
+          pm1Value: purpleAirDevice.pm1Value,
+          pm25Value: purpleAirDevice.pm25Value,
+          pm10Value: purpleAirDevice.pm10Value,
+        };
+
+        // Stocker les données PurpleAir
+        setPurpleAirDeviceData((prev) => ({
+          ...prev,
+          [device.id]: deviceData,
+        }));
+
+        const stationInfo: StationInfo = {
+          id: device.id,
+          name: device.name,
+          address: device.address || "",
+          departmentId: device.departmentId || "",
+          source: device.source,
+          variables: {}, // PurpleAir ne fournit pas de variables contrôlables
+        };
+
+        sidePanels.setSelectedStation(stationInfo);
+        sidePanels.setIsSidePanelOpen(true);
+
+        // Si le panneau est caché, le rouvrir automatiquement
+        if (sidePanels.panelSize === "hidden") {
+          sidePanels.setPanelSize("normal");
+        }
+        return;
+      }
+
+      // Gérer Sensor Community avec side panel
+      if (device.source === "sensorCommunity") {
+        // Extraire l'ID du capteur depuis l'ID du device (format: sensorId_locationId)
+        // On stocke l'ID complet pour pouvoir l'afficher, mais le sensorId sera extrait dans le side panel
+        const stationInfo: StationInfo = {
+          id: device.id, // Format: sensorId_locationId ou sensorId directement
+          name: device.name,
+          address: device.address || "",
+          departmentId: device.departmentId || "",
+          source: device.source,
+          variables: {}, // SensorCommunity ne fournit pas de variables contrôlables
+        };
+
+        sidePanels.setSelectedStation(stationInfo);
+        sidePanels.setIsSidePanelOpen(true);
+
+        // Si le panneau est caché, le rouvrir automatiquement
+        if (sidePanels.panelSize === "hidden") {
+          sidePanels.setPanelSize("normal");
+        }
+        return;
+      }
+
+      // En mode comparaison, gérer AtmoRef, AtmoMicro, NebuleAir et ModuleAir
+      if (sidePanels.comparisonState.isComparisonMode) {
+        if (
+          device.source === "atmoRef" ||
+          device.source === "atmoMicro" ||
+          device.source === "nebuleair" ||
+          device.source === "moduleair"
+        ) {
+          await handleAddStationToComparison(device);
+        }
+        return;
+      }
+
+      // Supporter AtmoRef, AtmoMicro, NebuleAir et ModuleAir en mode normal
+      if (
+        device.source !== "atmoRef" &&
+        device.source !== "atmoMicro" &&
+        device.source !== "nebuleair" &&
+        device.source !== "moduleair"
+      ) {
+        return;
+      }
+
+      // Initialiser les variables par défaut
       let variables: Record<
         string,
         { label: string; code_iso: string; en_service: boolean }
       > = {};
-
-      // Récupérer les informations détaillées selon la source
       let sensorModel: string | undefined;
       let lastSeenSec: number | undefined;
 
-      if (device.source === "atmoRef") {
-        const atmoRefService = new AtmoRefService();
-        variables = await atmoRefService.fetchStationVariables(device.id);
-      } else if (device.source === "atmoMicro") {
-        const atmoMicroService = new AtmoMicroService();
-        const siteInfo = await atmoMicroService.fetchSiteVariables(device.id);
-        variables = siteInfo.variables;
-        sensorModel = siteInfo.sensorModel;
-      } else if (device.source === "nebuleair") {
-        const nebuleAirService = new NebuleAirService();
-        const siteInfo = await nebuleAirService.fetchSiteInfo(device.id);
-        variables = siteInfo.variables;
-        lastSeenSec = siteInfo.lastSeenSec;
-      } else if (device.source === "moduleair") {
-        const moduleAirService = new ModuleAirService();
-        const siteInfo = await moduleAirService.fetchSiteInfo(device.id);
-        variables = siteInfo.variables;
-        lastSeenSec = siteInfo.lastSeenSec;
+      try {
+        // Récupérer les informations détaillées selon la source
+        if (device.source === "atmoRef") {
+          const atmoRefService = new AtmoRefService();
+          variables = await atmoRefService.fetchStationVariables(device.id);
+        } else if (device.source === "atmoMicro") {
+          const atmoMicroService = new AtmoMicroService();
+          const siteInfo = await atmoMicroService.fetchSiteVariables(device.id);
+          variables = siteInfo.variables;
+          sensorModel = siteInfo.sensorModel;
+        } else if (device.source === "nebuleair") {
+          const nebuleAirService = new NebuleAirService();
+          const siteInfo = await nebuleAirService.fetchSiteInfo(device.id);
+          variables = siteInfo.variables;
+          lastSeenSec = siteInfo.lastSeenSec;
+        } else if (device.source === "moduleair") {
+          const moduleAirService = new ModuleAirService();
+          const siteInfo = await moduleAirService.fetchSiteInfo(device.id);
+          variables = siteInfo.variables;
+          lastSeenSec = siteInfo.lastSeenSec;
+        }
+      } catch (error) {
+        console.error(
+          "Erreur lors de la récupération des informations de la station:",
+          error
+        );
+        // Continuer avec des variables vides - le sidepanel s'ouvrira quand même
       }
 
+      // Toujours ouvrir le sidepanel, même en cas d'erreur
       const stationInfo: StationInfo = {
         id: device.id,
         name: device.name,
@@ -510,13 +669,18 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
       if (sidePanels.panelSize === "hidden") {
         sidePanels.setPanelSize("normal");
       }
-    } catch (error) {
-      console.error(
-        "Erreur lors de la récupération des informations de la station:",
-        error
-      );
+    } finally {
+      // Réinitialiser le flag après un court délai pour permettre les clics sur d'autres devices
+      setTimeout(() => {
+        isProcessingClickRef.current = false;
+        // Ne réinitialiser lastClickedDeviceIdRef que si c'est toujours le même device
+        if (lastClickedDeviceIdRef.current === device.id) {
+          lastClickedDeviceIdRef.current = null;
+        }
+      }, 500); // Délai de 500ms pour éviter les clics multiples rapides
     }
-  };
+  }, [isHistoricalModeActive, hideTooltip, sidePanels, handleAddStationToComparison]);
+
 
   // Callback pour la sélection d'un capteur depuis la recherche
   const handleSensorSelected = useCallback(
@@ -534,76 +698,6 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
     },
     [handleMarkerClick]
   );
-
-  // Handler pour ajouter une station à la comparaison
-  const handleAddStationToComparison = async (device: MeasurementDevice) => {
-    // Vérifier les limites (max 5 stations)
-    if (sidePanels.comparisonState.comparedStations.length >= 5) {
-      console.warn("Maximum 5 stations autorisées en comparaison");
-      return;
-    }
-
-    // Vérifier que la station n'est pas déjà dans la liste
-    const isAlreadyAdded = sidePanels.comparisonState.comparedStations.some(
-      (station) => station.id === device.id
-    );
-    if (isAlreadyAdded) {
-      console.warn("Station déjà ajoutée à la comparaison");
-      return;
-    }
-
-    try {
-      let variables: Record<
-        string,
-        { label: string; code_iso: string; en_service: boolean }
-      > = {};
-
-      // Récupérer les informations détaillées selon la source
-      let sensorModel: string | undefined;
-      let lastSeenSec: number | undefined;
-
-      if (device.source === "atmoRef") {
-        const atmoRefService = new AtmoRefService();
-        variables = await atmoRefService.fetchStationVariables(device.id);
-      } else if (device.source === "atmoMicro") {
-        const atmoMicroService = new AtmoMicroService();
-        const siteInfo = await atmoMicroService.fetchSiteVariables(device.id);
-        variables = siteInfo.variables;
-        sensorModel = siteInfo.sensorModel;
-      } else if (device.source === "nebuleair") {
-        const nebuleAirService = new NebuleAirService();
-        const siteInfo = await nebuleAirService.fetchSiteInfo(device.id);
-        variables = siteInfo.variables;
-        lastSeenSec = siteInfo.lastSeenSec;
-      } else if (device.source === "moduleair") {
-        const moduleAirService = new ModuleAirService();
-        const siteInfo = await moduleAirService.fetchSiteInfo(device.id);
-        variables = siteInfo.variables;
-        lastSeenSec = siteInfo.lastSeenSec;
-      }
-
-      const stationInfo: StationInfo = {
-        id: device.id,
-        name: device.name,
-        address: device.address || "",
-        departmentId: device.departmentId || "",
-        source: device.source,
-        variables,
-        sensorModel,
-        ...(lastSeenSec !== undefined && { lastSeenSec }),
-      };
-
-      sidePanels.setComparisonState((prev) => ({
-        ...prev,
-        comparedStations: [...prev.comparedStations, stationInfo],
-      }));
-    } catch (error) {
-      console.error(
-        "Erreur lors de l'ajout de la station à la comparaison:",
-        error
-      );
-    }
-  };
 
   // Les handlers SignalAir et MobileAir sont maintenant dans leurs hooks respectifs
   // Utiliser signalAir.* et mobileAir.* pour accéder aux handlers
@@ -669,6 +763,8 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
             onSizeChange={sidePanels.handleSidePanelSizeChange}
             panelSize={sidePanels.panelSize}
             initialPollutant={selectedPollutant}
+            onComparisonModeToggle={sidePanels.handleComparisonModeToggle}
+            isComparisonMode={sidePanels.comparisonState.isComparisonMode}
           />
         )}
 
@@ -801,6 +897,8 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
           minZoom={1}
           maxZoom={18}
         >
+          {/* Gestionnaire d'événements pour masquer le tooltip lors d'un clic sur la carte */}
+          <MapClickHandler onMapClick={() => hideTooltip(true)} />
           {/* Fond de carte initial */}
           <TileLayer
             attribution='&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -844,7 +942,12 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
                     position={[device.latitude, device.longitude]}
                     icon={createCustomIconWrapper(device)}
                     eventHandlers={{
-                      click: () => handleMarkerClick(device),
+                      click: () => {
+                        hideTooltip(true);
+                        handleMarkerClick(device);
+                      },
+                      mouseover: (e) => showTooltip(device, e),
+                      mouseout: () => hideTooltip(),
                     }}
                   />
                 ))}
@@ -863,8 +966,11 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
                 handleMarkerClick={handleMarkerClick}
                 enabled={spiderfyConfig.enabled}
                 nearbyDistance={10} // Distance en pixels pour considérer les marqueurs comme se chevauchant
-                zoomThreshold={spiderfyConfig.autoSpiderfyZoomThreshold} // Seuil de zoom pour activer le spiderfier
+                zoomThreshold={spiderfyConfig.autoSpiderfyZoomThreshold} // Seuil de zoom pour activer/désactiver le spiderfier
                 getMarkerKey={getMarkerKeyWrapper}
+                onMarkerHover={showTooltip}
+                onMarkerHoverOut={hideTooltip}
+                onMarkerClick={() => hideTooltip(true)}
               />
             ) : (
               devices
@@ -881,11 +987,17 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
                     position={[device.latitude, device.longitude]}
                     icon={createCustomIconWrapper(device)}
                     eventHandlers={{
-                      click: () => handleMarkerClick(device),
+                      click: () => {
+                        hideTooltip(true);
+                        handleMarkerClick(device);
+                      },
+                      mouseover: (e) => showTooltip(device, e),
+                      mouseout: () => hideTooltip(),
                     }}
                   />
                 ))
-            )}
+            )
+          }
 
           {/* Parcours MobileAir - Afficher seulement la route active */}
           <MobileAirRoutes
@@ -895,6 +1007,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
             onPointHover={mobileAir.handleMobileAirPointHover}
             onRouteClick={handleMobileAirRouteClickWrapper}
             highlightedPoint={mobileAir.highlightedMobileAirPoint}
+            hoveredPoint={mobileAir.hoveredMobileAirPoint}
           />
 
           {/* Marqueurs pour les incendies en cours */}
@@ -947,18 +1060,24 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
               </Marker>
             ))}
 
-          {/* Marqueurs pour les signalements SignalAir */}
-          {reports.map((report) => (
-            <Marker
-              key={report.id}
-              position={[report.latitude, report.longitude]}
-              icon={createSignalIconWrapper(report)}
-              eventHandlers={{
-                click: () => handleSignalAirMarkerClickWrapper(report),
-              }}
-            />
-          ))}
+          {/* Marqueurs pour les signalements SignalAir avec spiderfier */}
+          <CustomSpiderfiedSignalAirMarkers
+            reports={reports}
+            createSignalIcon={createSignalIconWrapper}
+            handleMarkerClick={handleSignalAirMarkerClickWrapper}
+            enabled={spiderfyConfig.enabled}
+            zoomThreshold={spiderfyConfig.autoSpiderfyZoomThreshold}
+          />
         </MapContainer>
+
+        {/* Tooltip au hover sur les marqueurs */}
+        {tooltip.device && (
+          <MarkerTooltip
+            device={tooltip.device}
+            position={tooltip.position}
+            sensorMetadata={tooltipMetadata || undefined}
+          />
+        )}
 
         {signalAir.signalAirFeedback && (
           <div className="absolute top-24 right-4 z-[1000] max-w-sm bg-white border border-blue-200 text-blue-800 text-sm px-3 py-2 rounded-lg shadow-lg">
@@ -1076,22 +1195,25 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
           className={`absolute ${sidePanels.isSidePanelOpen && sidePanels.panelSize !== "hidden"
             ? "bottom-8 right-4 hidden lg:block"
             : "bottom-6 right-0 hidden lg:block"
-            } bg-white px-3 py-1 rounded-md shadow-lg z-[1000] transition-all duration-300`}
+            } bg-white px-3 py-2 rounded-md shadow-lg z-[1000] transition-all duration-300`}
         >
-          <p className="text-xs text-gray-600">
-            {devices.length} appareil{devices.length > 1 ? "s" : ""}
-            {reports.length > 0 && (
-              <span className="ml-2">
-                • {reports.length} signalement{reports.length > 1 ? "s" : ""}
-              </span>
-            )}
-            {wildfire.isWildfireLayerEnabled && wildfire.wildfireReports.length > 0 && (
-              <span className="ml-2">
-                • {wildfire.wildfireReports.length} incendie
-                {wildfire.wildfireReports.length > 1 ? "s" : ""} en cours
-              </span>
-            )}
-          </p>
+          <DeviceStatistics
+            visibleDevices={visibleDevices}
+            visibleReports={visibleReports}
+            totalDevices={devices.length}
+            totalReports={reports.length}
+            selectedPollutant={selectedPollutant}
+            selectedSources={selectedSources}
+            statistics={statistics} // OPTIMISATION : Passer les statistiques pré-calculées
+            sourceStatistics={sourceStatistics} // OPTIMISATION : Passer les stats par source pré-calculées
+            showDetails={false}
+          />
+          {wildfire.isWildfireLayerEnabled && wildfire.wildfireReports.length > 0 && (
+            <div className="mt-1 text-xs text-gray-600">
+              • {wildfire.wildfireReports.length} incendie
+              {wildfire.wildfireReports.length > 1 ? "s" : ""} en cours
+            </div>
+          )}
         </div>
 
         {/* Indicateur de spiderfier actif supprimé */}
@@ -1115,7 +1237,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
         };
 
         // Calculer quels boutons doivent être affichés
-        const buttons: Array<{ key: string; element: JSX.Element }> = [];
+        const buttons: Array<{ key: string; element: React.ReactElement }> = [];
         const spacing = 60; // Espacement entre les boutons
 
         // Bouton pour rouvrir le panel de station masqué

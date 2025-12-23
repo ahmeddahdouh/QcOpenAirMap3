@@ -66,17 +66,6 @@ export class SignalAirService extends BaseDataService {
     yib5aa1n: "brulage",
   };
 
-  // Proxys CORS publics disponibles
-  private readonly CORS_PROXIES = {
-    allorigins: "https://api.allorigins.win/raw?url=",
-    corsanywhere: "https://cors-anywhere.herokuapp.com/",
-  };
-
-  // Proxy local Vite pour le développement
-  private readonly LOCAL_PROXY = "/signalair";
-
-  // Option pour utiliser le proxy local (développement)
-  private useLocalProxy = import.meta.env.DEV;
 
   // Cache pour les signalements
   private signalCache: SignalAirReport[] = [];
@@ -131,7 +120,6 @@ export class SignalAirService extends BaseDataService {
         }
 
         try {
-          // Utiliser la nouvelle méthode fetchSignalAirData qui gère les proxys
           const response = await this.fetchSignalAirData(
             signalTypeKey,
             period
@@ -266,83 +254,13 @@ export class SignalAirService extends BaseDataService {
     signalType: string,
     period: { startDate: string; endDate: string }
   ): Promise<SignalAirGeoJSON | null> {
-    const directUrl = `${this.SIGNAL_URLS[signalType]}/${period.startDate}/${period.endDate}`;
+    const url = `${this.SIGNAL_URLS[signalType]}/${period.startDate}/${period.endDate}`;
 
-    // En développement, utiliser TOUJOURS le proxy local en premier
-    if (this.useLocalProxy) {
-      try {
-        const localProxyUrl = `${this.LOCAL_PROXY}${this.SIGNAL_URLS[
-          signalType
-        ].replace("https://www.signalair.eu", "")}/${period.startDate}/${
-          period.endDate
-        }`;
-
-        const response = await this.makeRequest(localProxyUrl, {
-          method: "GET",
-          headers: {
-            Accept: "application/geo+json,application/json",
-            "Content-Type": "application/json",
-          },
-        });
-
-        // Vérifier que la réponse est bien du JSON
-        if (
-          response &&
-          typeof response === "object" &&
-          response.type === "FeatureCollection"
-        ) {
-          return response;
-        } else {
-          return null;
-        }
-      } catch (error) {
-        console.warn(
-          `⚠️ SignalAir - Échec proxy local pour ${signalType}, tentative proxy public`
-        );
-      }
-    }
-
-    // Si pas en développement ou si le proxy local a échoué, utiliser les proxys publics
-    for (const [proxyName, proxyUrl] of Object.entries(this.CORS_PROXIES)) {
-      try {
-        const fullProxyUrl = `${proxyUrl}${encodeURIComponent(directUrl)}`;
-
-        const response = await this.makeRequest(fullProxyUrl, {
-          method: "GET",
-          headers: {
-            Accept: "application/geo+json,application/json",
-            "Content-Type": "application/json",
-          },
-          mode: "cors",
-          credentials: "omit",
-        });
-
-        // Vérifier que la réponse est bien du JSON
-        if (
-          response &&
-          typeof response === "object" &&
-          response.type === "FeatureCollection"
-        ) {
-          return response;
-        } else {
-          return null;
-        }
-      } catch (proxyError) {
-        console.warn(
-          `⚠️ SignalAir - Échec avec ${proxyName} pour ${signalType}:`,
-          proxyError
-        );
-        continue; // Essayer le prochain proxy
-      }
-    }
-
-    // En dernier recours, essayer la requête directe (peut échouer à cause de CORS)
     try {
-      const response = await this.makeRequest(directUrl, {
+      const response = await this.makeRequest(url, {
         method: "GET",
         headers: {
           Accept: "application/geo+json,application/json",
-          "Content-Type": "application/json",
         },
         mode: "cors",
         credentials: "omit",
@@ -358,14 +276,12 @@ export class SignalAirService extends BaseDataService {
       } else {
         return null;
       }
-    } catch (directError) {
+    } catch (error) {
       console.error(
-        `❌ SignalAir - Échec complet pour ${signalType}:`,
-        directError
+        `❌ SignalAir - Erreur lors de la récupération des données pour ${signalType}:`,
+        error
       );
-      throw new Error(
-        `Impossible de récupérer les données SignalAir pour ${signalType}. Tous les proxys ont échoué.`
-      );
+      throw error;
     }
   }
 }

@@ -63,6 +63,8 @@ interface NebuleAirSidePanelProps {
   onSizeChange?: (size: "normal" | "fullscreen" | "hidden") => void;
   initialPollutant: string;
   panelSize?: "normal" | "fullscreen" | "hidden";
+  onComparisonModeToggle?: () => void;
+  isComparisonMode?: boolean;
 }
 
 type PanelSize = "normal" | "fullscreen" | "hidden";
@@ -75,6 +77,8 @@ const NebuleAirSidePanel: React.FC<NebuleAirSidePanelProps> = ({
   onSizeChange,
   initialPollutant,
   panelSize: externalPanelSize,
+  onComparisonModeToggle,
+  isComparisonMode = false,
 }) => {
   const initialTimeStep = getInitialTimeStepForPollutants(
     initialPollutant ? [initialPollutant] : [],
@@ -388,6 +392,15 @@ const NebuleAirSidePanel: React.FC<NebuleAirSidePanelProps> = ({
 
   const handlePollutantToggle = (pollutant: string) => {
     setState((prev) => {
+      // Empêcher la désélection du dernier polluant
+      if (
+        prev.chartControls.selectedPollutants.includes(pollutant) &&
+        prev.chartControls.selectedPollutants.length === 1
+      ) {
+        // Ne rien faire si c'est le dernier polluant sélectionné
+        return prev;
+      }
+
       const newSelectedPollutants =
         prev.chartControls.selectedPollutants.includes(pollutant)
           ? prev.chartControls.selectedPollutants.filter((p) => p !== pollutant)
@@ -806,6 +819,47 @@ const NebuleAirSidePanel: React.FC<NebuleAirSidePanelProps> = ({
       {/* Contenu - masqué quand currentPanelSize === 'hidden' */}
       {currentPanelSize !== "hidden" && (
         <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4 sm:space-y-6">
+          {/* Informations station sélectionnée */}
+          <div className="border border-gray-200 rounded-lg p-3 sm:p-4">
+            <div className="flex items-start justify-between space-x-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">
+                  {selectedStation.name}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  NebuleAir AirCarto{selectedStation.address ? ` · ${selectedStation.address}` : ""}
+                </p>
+              </div>
+
+              {/* Bouton mode comparaison */}
+              {onComparisonModeToggle && (
+                <button
+                  onClick={onComparisonModeToggle}
+                  className={`px-3 py-1.5 rounded-md text-xs transition-all duration-200 flex items-center ${
+                    isComparisonMode
+                      ? "text-green-700 bg-green-50 border border-green-200"
+                      : "text-gray-700 hover:bg-gray-50 border border-gray-200"
+                  }`}
+                >
+                  <svg
+                    className="w-3 h-3 mr-1"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    />
+                  </svg>
+                  {isComparisonMode ? "Désactiver comparaison" : "Activer comparaison"}
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Graphique avec contrôles intégrés */}
           <div className="flex-1 min-h-80 sm:min-h-96 md:min-h-[28rem]">
             <h3 className="text-sm font-medium text-gray-700 mb-2 sm:mb-3">
@@ -898,6 +952,9 @@ const NebuleAirSidePanel: React.FC<NebuleAirSidePanelProps> = ({
                             state.chartControls.selectedPollutants.includes(
                               pollutantCode
                             );
+                          const isLastSelectedAndDisabled =
+                            isSelected &&
+                            state.chartControls.selectedPollutants.length === 1;
 
                           return (
                             <button
@@ -906,10 +963,19 @@ const NebuleAirSidePanel: React.FC<NebuleAirSidePanelProps> = ({
                                 isEnabled &&
                                 handlePollutantToggle(pollutantCode)
                               }
-                              disabled={!isEnabled}
+                              disabled={!isEnabled || isLastSelectedAndDisabled}
+                              title={
+                                isLastSelectedAndDisabled
+                                  ? "Au moins un polluant doit rester sélectionné"
+                                  : !isEnabled
+                                  ? "Ce polluant n'est pas disponible pour cette station"
+                                  : undefined
+                              }
                               className={`w-full flex items-center px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-md text-sm transition-all duration-200 ${
                                 !isEnabled
                                   ? "text-gray-400 cursor-not-allowed"
+                                  : isLastSelectedAndDisabled
+                                  ? "text-[#1f3c6d] bg-[#e7eef8] border border-[#c1d3eb] opacity-70 cursor-not-allowed"
                                   : isSelected
                                   ? "text-[#1f3c6d] bg-[#e7eef8] border border-[#c1d3eb]"
                                   : "text-gray-700 hover:bg-gray-50"
@@ -919,14 +985,20 @@ const NebuleAirSidePanel: React.FC<NebuleAirSidePanelProps> = ({
                                 className={`w-3 h-3 rounded border mr-2 flex items-center justify-center transition-colors flex-shrink-0 ${
                                   !isEnabled
                                     ? "border-gray-300 bg-gray-100"
-                                  : isSelected
-                                  ? "bg-[#325a96] border-[#325a96]"
-                                  : "border-gray-300"
+                                    : isLastSelectedAndDisabled
+                                    ? "bg-[#325a96] border-[#325a96] opacity-60"
+                                    : isSelected
+                                    ? "bg-[#325a96] border-[#325a96]"
+                                    : "border-gray-300"
                                 }`}
                               >
-                                {isSelected && isEnabled && (
+                                {isSelected && (
                                   <svg
-                                    className="w-2 h-2 text-white"
+                                    className={`w-2 h-2 ${
+                                      isLastSelectedAndDisabled
+                                        ? "text-white opacity-60"
+                                        : "text-white"
+                                    }`}
                                     fill="currentColor"
                                     viewBox="0 0 20 20"
                                   >

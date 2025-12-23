@@ -127,9 +127,12 @@ const PollutionEpisodeCalendar: React.FC<PollutionEpisodeCalendarProps> = ({
     return days;
   };
 
-  // Formater la date en YYYY-MM-DD
+  // Formater la date en YYYY-MM-DD en utilisant les méthodes locales pour éviter les décalages UTC
   const formatDateKey = (date: Date): string => {
-    return date.toISOString().split("T")[0];
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
   // Obtenir le niveau d'alerte pour une date

@@ -23,6 +23,7 @@ interface UseAmChartsChartProps {
   isMobile: boolean;
   isLandscapeMobile: boolean;
   stationInfo: any | null;
+  timeStep?: string;
 }
 
 export const useAmChartsChart = ({
@@ -38,6 +39,7 @@ export const useAmChartsChart = ({
   isMobile,
   isLandscapeMobile,
   stationInfo,
+  timeStep,
 }: UseAmChartsChartProps) => {
   const chartRef = useRef<am5xy.XYChart | null>(null);
   const rootRef = useRef<am5.Root | null>(null);
@@ -89,9 +91,23 @@ export const useAmChartsChart = ({
     chartRef.current = chart;
 
     // Créer l'axe X (dates)
+    // IMPORTANT: baseInterval doit correspondre à la granularité des données
+    // pour que les gaps fonctionnent correctement avec connect: false
+    let baseInterval: { timeUnit: "minute" | "hour" | "day" | "second"; count: number };
+    if (timeStep === "quartHeure") {
+      baseInterval = { timeUnit: "minute", count: 15 };
+    } else if (timeStep === "heure") {
+      baseInterval = { timeUnit: "hour", count: 1 };
+    } else if (timeStep === "jour") {
+      baseInterval = { timeUnit: "day", count: 1 };
+    } else {
+      // Par défaut, utiliser la seconde pour les données non agrégées
+      baseInterval = { timeUnit: "second", count: 1 };
+    }
+    
     const xAxis = chart.xAxes.push(
       am5xy.DateAxis.new(root, {
-        baseInterval: { timeUnit: "second", count: 1 },
+        baseInterval: baseInterval,
         renderer: am5xy.AxisRendererX.new(root, {
           minGridDistance: isMobile ? 70 : 50,
           cellStartLocation: 0,
@@ -185,12 +201,12 @@ export const useAmChartsChart = ({
         return;
       }
 
-      createLineSeries(root, chart, xAxis, yAxis, seriesConfig, amChartsData);
+      createLineSeries(root, chart, xAxis as am5xy.DateAxis<am5xy.AxisRendererX>, yAxis, seriesConfig, amChartsData, timeStep);
     });
 
     // Créer le curseur
     const cursor = chart.set("cursor", am5xy.XYCursor.new(root, {
-      behavior: "none",
+      behavior: "zoomXY",
       xAxis: xAxis,
     }));
     
@@ -271,11 +287,12 @@ export const useAmChartsChart = ({
     chart.series.clear();
 
     // Recréer les séries avec la nouvelle configuration
+    // IMPORTANT: Passer timeStep pour que connect: false soit appliqué pour les pas de temps agrégés
     seriesConfigs.forEach((seriesConfig) => {
       const yAxis = yAxisMap.get(seriesConfig.yAxisId);
       if (!yAxis) return;
 
-      createLineSeries(rootRef.current!, chart, xAxis, yAxis, seriesConfig, amChartsData);
+      createLineSeries(rootRef.current!, chart, xAxis as am5xy.DateAxis<am5xy.AxisRendererX>, yAxis, seriesConfig, amChartsData, timeStep);
     });
 
     // Remettre la référence du curseur aux nouvelles séries
@@ -290,7 +307,7 @@ export const useAmChartsChart = ({
         legend.data.setAll(chart.series.values);
       }
     });
-  }, [seriesConfigs, amChartsData]);
+  }, [seriesConfigs, amChartsData, timeStep]);
 
   // Mise à jour des zones de seuils
   useEffect(() => {

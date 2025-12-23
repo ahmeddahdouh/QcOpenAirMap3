@@ -20,6 +20,7 @@ interface MobileAirRoutesProps {
   onPointHover?: (point: MobileAirDataPoint | null) => void;
   onRouteClick?: (route: MobileAirRoute) => void;
   highlightedPoint?: MobileAirDataPoint | null;
+  hoveredPoint?: MobileAirDataPoint | null;
 }
 
 const MobileAirRoutes: React.FC<MobileAirRoutesProps> = memo(
@@ -30,6 +31,7 @@ const MobileAirRoutes: React.FC<MobileAirRoutesProps> = memo(
     onPointHover,
     onRouteClick,
     highlightedPoint,
+    hoveredPoint,
   }) => {
     // Vérifier si le polluant est supporté par MobileAir
     const isPollutantSupported = Object.values(
@@ -47,17 +49,34 @@ const MobileAirRoutes: React.FC<MobileAirRoutesProps> = memo(
       }-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`;
     };
 
-    // Fonction pour comparer deux points avec une tolérance appropriée (optimisée)
+    // Fonction pour comparer deux points avec une tolérance appropriée
+    // Doit être identique à celle dans MobileAirDetailPanel pour la cohérence
     const isSamePoint = (
       point1: MobileAirDataPoint,
       point2: MobileAirDataPoint
     ): boolean => {
-      // Comparaison rapide par identifiant unique (plus fiable et plus rapide)
-      return (
+      // Comparaison d'abord par identifiant unique (plus fiable)
+      if (
         point1.sensorId === point2.sensorId &&
         point1.sessionId === point2.sessionId &&
         point1.time === point2.time
-      );
+      ) {
+        return true;
+      }
+
+      // Fallback avec tolérance pour les coordonnées (au cas où les timestamps diffèrent légèrement)
+      const COORDINATE_TOLERANCE = 0.0001; // Environ 10 mètres
+
+      // Comparaison des coordonnées avec tolérance
+      const latMatch = Math.abs(point1.lat - point2.lat) < COORDINATE_TOLERANCE;
+      const lonMatch = Math.abs(point1.lon - point2.lon) < COORDINATE_TOLERANCE;
+
+      // Comparaison des timestamps (plus flexible)
+      const time1 = new Date(point1.time).getTime();
+      const time2 = new Date(point2.time).getTime();
+      const timeMatch = Math.abs(time1 - time2) < 1000; // Tolérance de 1 seconde
+
+      return latMatch && lonMatch && timeMatch;
     };
     // Utiliser les fonctions centralisées pour la cohérence avec la légende
 
@@ -192,71 +211,83 @@ const MobileAirRoutes: React.FC<MobileAirRoutesProps> = memo(
                   pollutants
                 );
 
-                // Vérifier si ce point est mis en évidence
-                const isHighlighted =
-                  highlightedPoint && isSamePoint(highlightedPoint, point);
+                // Vérifier si ce point est survolé
+                const isHovered =
+                  hoveredPoint && isSamePoint(hoveredPoint, point);
 
-                // Debug simplifié - seulement pour les points mis en surbrillance
-                if (isHighlighted) {
-                  console.log(
-                    "🎨 Point mis en surbrillance:",
-                    getPointId(point),
-                    "radius:",
-                    10
-                  );
-                }
 
                 return (
                   <React.Fragment
                     key={`${route.sensorId}-${route.sessionId}-point-${index}`}
                   >
-                    {/* Ombre portée pour le point mis en évidence */}
-                    {isHighlighted && (
-                      <CircleMarker
-                        center={[point.lat, point.lon]}
-                        radius={18}
-                        pathOptions={{
-                          color: "rgba(0, 0, 0, 0.2)",
-                          fillColor: "rgba(0, 0, 0, 0.1)",
-                          fillOpacity: 0.3,
-                          weight: 0,
-                          opacity: 0.6,
-                        }}
-                      />
+                    {/* Ombre portée pour l'effet de relief (seulement si survolé) */}
+                    {isHovered && (
+                      <>
+                        {/* Ombre externe (grande, très transparente) */}
+                        <CircleMarker
+                          center={[point.lat, point.lon]}
+                          radius={18}
+                          pathOptions={{
+                            color: "rgba(0, 0, 0, 0.15)",
+                            fillColor: "rgba(0, 0, 0, 0.1)",
+                            fillOpacity: 0.2,
+                            weight: 0,
+                            opacity: 0.6,
+                          }}
+                          interactive={false}
+                        />
+                        {/* Ombre moyenne */}
+                        <CircleMarker
+                          center={[point.lat, point.lon]}
+                          radius={14}
+                          pathOptions={{
+                            color: "rgba(0, 0, 0, 0.2)",
+                            fillColor: "rgba(0, 0, 0, 0.15)",
+                            fillOpacity: 0.25,
+                            weight: 0,
+                            opacity: 0.7,
+                          }}
+                          interactive={false}
+                        />
+                        {/* Halo gris foncé autour du point */}
+                        <CircleMarker
+                          center={[point.lat, point.lon]}
+                          radius={12}
+                          pathOptions={{
+                            color: "#374151",
+                            fillColor: "#374151",
+                            fillOpacity: 0.2,
+                            weight: 2,
+                            opacity: 0.8,
+                          }}
+                          interactive={false}
+                        />
+                      </>
                     )}
 
                     {/* Point principal */}
                     <CircleMarker
                       center={[point.lat, point.lon]}
-                      radius={isHighlighted ? 12 : 6}
+                      radius={isHovered ? 12 : 6}
                       pathOptions={{
-                        color: isHighlighted ? "#FFFFFF" : color, // Bordure blanche pour le point mis en évidence
+                        color: isHovered ? "#FFFF00" : color, // Bordure jaune pour hover
                         fillColor: color, // Garder la couleur de qualité
-                        fillOpacity: isHighlighted ? 0.9 : 0.8,
-                        weight: isHighlighted ? 3 : 2, // Bordure plus épaisse pour la mise en évidence
+                        fillOpacity: isHovered ? 1 : 0.8,
+                        weight: isHovered ? 3 : 2, // Bordure plus épaisse pour le hover
                         opacity: 1,
                       }}
                       eventHandlers={{
                         click: () => {
-                          console.log(
-                            "🖱️ Click sur point de la carte:",
-                            getPointId(point)
-                          );
                           if (onPointClick) {
                             onPointClick(route, point);
                           }
                         },
                         mouseover: () => {
-                          console.log(
-                            "🖱️ Mouse over sur point de la carte:",
-                            getPointId(point)
-                          );
                           if (onPointHover) {
                             onPointHover(point);
                           }
                         },
                         mouseout: () => {
-                          console.log("🖱️ Mouse out sur point de la carte");
                           if (onPointHover) {
                             onPointHover(null);
                           }

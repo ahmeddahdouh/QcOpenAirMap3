@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { SignalAirReport } from "../../types";
+import { convertWGS84ToLambert93 } from "../../utils/coordinateUtils";
 
 type PanelSize = "normal" | "fullscreen" | "hidden";
 
@@ -110,6 +111,33 @@ const SignalAirDetailPanel: React.FC<SignalAirDetailPanelProps> = ({
   const handleCenterMapClick = () => {
     if (report && onCenterMap) {
       onCenterMap(report);
+    }
+  };
+
+  // Calcul des coordonnées Lambert 93
+  const lambert93Coords = useMemo(() => {
+    if (!report) {
+      return null;
+    }
+    return convertWGS84ToLambert93(report.latitude, report.longitude);
+  }, [report]);
+
+  const handleCopyCoordinate = async (type: "x" | "y") => {
+    if (!lambert93Coords) {
+      return;
+    }
+
+    const text =
+      type === "x"
+        ? Math.round(lambert93Coords.x).toString()
+        : Math.round(lambert93Coords.y).toString();
+
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      }
+    } catch (error) {
+      console.error(`Erreur lors de la copie de la coordonnée ${type} :`, error);
     }
   };
 
@@ -306,27 +334,7 @@ const SignalAirDetailPanel: React.FC<SignalAirDetailPanelProps> = ({
             </div>
           </div>
 
-          {(report.city ||
-            report.postalCode ||
-            report.cityCode ||
-            report.address ||
-            report.locationHint ||
-            report.groupName) && (
-            <div className="border border-gray-200 rounded-lg p-3 sm:p-4 space-y-3">
-              <p className="text-sm font-semibold text-gray-900">
-                Zone concernée
-              </p>
-              <div className="space-y-2">
-                {renderInfoLine("Ville", report.city)}
-                {renderInfoLine("Code postal", report.postalCode)}
-                {renderInfoLine("Pays", report.countryCode)}
-                {renderInfoLine(
-                  "Adresse / lieu",
-                  report.address || report.locationHint
-                )}
-              </div>
-            </div>
-          )}
+          
 
           {(report.nuisanceOrigin ||
             report.nuisanceOriginDescription ||
@@ -437,7 +445,93 @@ const SignalAirDetailPanel: React.FC<SignalAirDetailPanelProps> = ({
               </a>
             </div>
           )}
-
+          {(report.city ||
+            report.postalCode ||
+            report.cityCode ||
+            report.address ||
+            report.locationHint ||
+            report.groupName) && (
+            <div className="border border-gray-200 rounded-lg p-3 sm:p-4 space-y-3">
+              <p className="text-sm font-semibold text-gray-900">
+                Zone concernée
+              </p>
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-700">
+                  <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-3">
+                    <span className="font-medium text-gray-900 sm:w-48">
+                      X (Lambert 93)
+                    </span>
+                    <span className="flex-1 font-mono">
+                      {lambert93Coords
+                        ? Math.round(lambert93Coords.x).toString()
+                        : "Calcul en cours..."}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCoordinate("x")}
+                    className="inline-flex items-center justify-center p-1.5 text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                    title="Copier la coordonnée X (Lambert 93)"
+                    disabled={!lambert93Coords}
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-700">
+                  <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-3">
+                    <span className="font-medium text-gray-900 sm:w-48">
+                      Y (Lambert 93)
+                    </span>
+                    <span className="flex-1 font-mono">
+                      {lambert93Coords
+                        ? Math.round(lambert93Coords.y).toString()
+                        : "Calcul en cours..."}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCoordinate("y")}
+                    className="inline-flex items-center justify-center p-1.5 text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                    title="Copier la coordonnée Y (Lambert 93)"
+                    disabled={!lambert93Coords}
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
+                    </svg>
+                  </button>
+                </div>
+                {renderInfoLine("Ville", report.city)}
+                {renderInfoLine("Code postal", report.postalCode)}
+                {renderInfoLine("Pays", report.countryCode)}
+                {renderInfoLine(
+                  "Adresse / lieu",
+                  report.address || report.locationHint
+                )}
+              </div>
+            </div>
+          )}
           <div className="border border-gray-200 rounded-lg p-3 sm:p-4 space-y-3">
             <div>
               <p className="text-sm font-semibold text-gray-900 mb-1">
