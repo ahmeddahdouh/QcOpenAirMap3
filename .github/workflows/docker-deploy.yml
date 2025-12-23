@@ -27,6 +27,9 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
+          build-args: |
+            VITE_STADIA_API_KEY=${{ secrets.STADIA_AUTH }}
+          
 
   deploy:
     needs: build-and-push
