@@ -869,7 +869,7 @@ const AirQualityMap: React.FC<AirQualityMapProps> = ({
           {/* Fond de carte initial */}
           <TileLayer
             attribution='&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png"
+            url="https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png?api_key=2768ac43-8ac9-4a1e-8855-b50a707aaff1"
             minZoom={0}
             maxZoom={20}
           />
