@@ -11,39 +11,67 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
+      
+      - name: Import Secrets from Vault
+        uses: hashicorp/vault-action@v2
+        with:
+          url: ${{ secrets.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          secrets: |
+            secret/data/github/production DOCKERHUB_USERNAME | DOCKERHUB_USERNAME ;
+            secret/data/github/production DOCKERHUB_PASSWORD | DOCKERHUB_PASSWORD ;
+            secret/data/github/production STADIA_AUTH | STADIA_AUTH
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
+      
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_PASSWORD }}
+      
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
+          tags: ${{ env.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
           build-args: |
-            VITE_STADIA_API_KEY=${{ secrets.STADIA_AUTH }}
+            VITE_STADIA_API_KEY=${{ env.STADIA_AUTH }}
           
-
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy on VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Import Secrets from Vault
+        uses: hashicorp/vault-action@v2
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT }}
-          script: |
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
+          url: ${{ secrets.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_SECRET_ID }}
+          secrets: |
+            secret/data/github/production DOCKERHUB_USERNAME | DOCKERHUB_USERNAME ;
+            secret/data/github/production VPS_HOST | VPS_HOST ;
+            secret/data/github/production VPS_USER | VPS_USER ;
+            secret/data/github/production VPS_PORT | VPS_PORT ;
+            secret/data/github/production VPS_SSH_KEY | VPS_SSH_KEY_BASE64
+      
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ env.VPS_SSH_KEY_BASE64 }}" | base64 -d > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ env.VPS_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: Deploy on VPS via SSH
+        run: |
+          ssh -i ~/.ssh/deploy_key -p ${{ env.VPS_PORT }} ${{ env.VPS_USER }}@${{ env.VPS_HOST }} << 'ENDSSH'
+            docker pull ${{ env.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
             docker stop qcopenairmap3 || true
             docker rm qcopenairmap3 || true
-            docker run -d --name qcopenairmap3 -p 8080:80 ${{ secrets.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
+            docker run -d --name qcopenairmap3 -p 8080:80 ${{ env.DOCKERHUB_USERNAME }}/qcopenairmap3:latest
+          ENDSSH
